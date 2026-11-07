@@ -156,3 +156,80 @@ fn check_tokenizer(version: &str) {
 fn godot_4_7_tokenizer() {
     check_tokenizer("4.7");
 }
+
+/// Godot's parser errors that need scope or type information, which
+/// gdsyntax leaves to Godot itself (gdtypecheck). One message start per line
+/// in `tests/godot/semantic-errors.txt`.
+fn semantic_errors() -> Vec<String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/godot/semantic-errors.txt");
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+fn check_parser(version: &str) {
+    let cases = cases(version);
+    let semantic = semantic_errors();
+    let is_semantic = |message: &str| semantic.iter().any(|part| message.contains(part.as_str()));
+
+    let mut failures = Vec::new();
+    let (mut matched, mut skipped) = (0, 0);
+    for case in &cases {
+        let source = std::fs::read_to_string(&case.path).unwrap();
+        let name = case
+            .path
+            .strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or(&case.path)
+            .display()
+            .to_string();
+        let parse = gdsyntax::parser::parse(&source);
+        let tree = gdsyntax::SyntaxNode::new_root(parse.green.clone());
+        if tree.to_string() != source {
+            failures.push(format!("{name}: the tree does not reproduce the source"));
+        }
+        let first = parse.errors.first().map(|e| e.message.as_str());
+
+        if case.outcome != "GDTEST_PARSER_ERROR" {
+            if let Some(message) = first {
+                let line = source[..parse.errors[0].start].matches('\n').count() + 1;
+                failures.push(format!(
+                    "{name}:{line}: Godot parses it, gdsyntax reports \"{message}\""
+                ));
+            }
+            continue;
+        }
+        let expected = case.message.as_deref().unwrap_or("");
+        if NOT_PORTED
+            .iter()
+            .any(|(start, _)| expected.starts_with(start))
+            || is_semantic(expected)
+        {
+            skipped += 1;
+            continue;
+        }
+        if first == Some(expected) {
+            matched += 1;
+        } else {
+            failures.push(format!(
+                "{name}: expected \"{expected}\", gdsyntax reports {first:?}"
+            ));
+        }
+    }
+    eprintln!("Godot {version} parser errors: {matched} matched, {skipped} semantic or not ported");
+    assert!(
+        failures.is_empty(),
+        "{} of {} Godot {version} scripts disagree:\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn godot_4_7_parser() {
+    check_parser("4.7");
+}

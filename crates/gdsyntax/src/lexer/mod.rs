@@ -38,6 +38,10 @@ pub struct LexError {
     /// Byte offsets of the error in the source.
     pub start: usize,
     pub end: usize,
+    /// Godot keeps this error back until the parser reads the next token
+    /// (its tokenizer's `error_stack`), which decides the order errors are
+    /// reported in.
+    pub deferred: bool,
 }
 
 /// Godot counts a tab as this many columns when comparing indentation. The
@@ -73,6 +77,8 @@ pub struct Lexer<'a> {
     /// Byte length of a byte order mark at the start, if there is one.
     bom_len: usize,
     reached_end: bool,
+    /// Whether errors recorded now are held back (see [`LexError::deferred`]).
+    defer_errors: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -94,6 +100,7 @@ impl<'a> Lexer<'a> {
             last_token: EOF,
             bom_len,
             reached_end: src.len() == bom_len,
+            defer_errors: false,
         }
     }
 
@@ -136,11 +143,17 @@ impl<'a> Lexer<'a> {
             });
         }
         loop {
+            let errors_before = self.errors.len();
             self.skip_whitespace(out);
 
             if let Some(pending) = self.pending_newline.take()
                 && !self.multiline_mode
             {
+                // Godot returns the line break before the errors found
+                // while skipping whitespace.
+                for error in &mut self.errors[errors_before..] {
+                    error.deferred = true;
+                }
                 // In multiline mode the line break stays trivia.
                 match pending {
                     PendingNewline::At(index) => out[index].kind = NEWLINE,
@@ -193,7 +206,9 @@ impl<'a> Lexer<'a> {
             }
 
             self.line_continuation = false;
+            self.defer_errors = true;
             let kind = self.token(c);
+            self.defer_errors = false;
             if kind == ERROR_TOKEN {
                 return self.finish_error_token(out);
             }
@@ -273,6 +288,7 @@ impl<'a> Lexer<'a> {
             message: message.into(),
             start,
             end: end.max(start),
+            deferred: self.defer_errors,
         });
     }
 
@@ -297,6 +313,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn finish_error_token(&mut self, out: &mut Vec<Token>) -> SyntaxKind {
+        // The error that made this an error token is reported right away.
+        if let Some(error) = self.errors.last_mut() {
+            error.deferred = false;
+        }
         out.push(Token {
             kind: ERROR_TOKEN,
             len: (self.pos - self.token_start) as u32,

@@ -170,6 +170,99 @@ syntax_kinds! {
     SOURCE_FILE,
     /// Code the parser could not make sense of.
     ERROR,
+
+    // Declarations
+    /// `@name` or `@name(args)`. Its first token is an `ANNOTATION`.
+    ANNOTATION_NODE,
+    /// The `(args)` of an annotation.
+    ANNOTATION_ARGS,
+    CLASS_NAME,
+    EXTENDS,
+    /// An inner class: `class Name extends Base:` and its body.
+    CLASS,
+    CLASS_BODY,
+    /// A string alone on a line at class level, used as a comment.
+    STRING_STATEMENT,
+    VAR,
+    CONST,
+    SIGNAL,
+    ENUM,
+    ENUM_VALUE,
+    FUNC,
+    PARAM_LIST,
+    PARAM,
+    /// `-> Type`
+    RETURN_TYPE,
+    /// `int`, `Node.Child`, `Array[int]`, `Dictionary[String, int]`.
+    TYPE,
+    /// The `[...]` of a typed collection.
+    TYPE_ARGS,
+    /// The `get`/`set` part of a variable after its second `:`.
+    PROPERTY,
+    SETTER,
+    GETTER,
+
+    // Statements
+    /// A block: one inline statement, or a line break, an indented list of
+    /// statements and the dedent.
+    SUITE,
+    PASS_STMT,
+    RETURN_STMT,
+    BREAK_STMT,
+    CONTINUE_STMT,
+    BREAKPOINT_STMT,
+    EXPR_STMT,
+    IF_STMT,
+    ELIF_CLAUSE,
+    ELSE_CLAUSE,
+    FOR_STMT,
+    WHILE_STMT,
+    MATCH_STMT,
+    MATCH_BRANCH,
+    /// `when condition` after match patterns.
+    PATTERN_GUARD,
+    ASSERT_STMT,
+
+    // Match patterns
+    BIND_PATTERN,
+    WILDCARD_PATTERN,
+    REST_PATTERN,
+    ARRAY_PATTERN,
+    DICT_PATTERN,
+    DICT_PATTERN_ENTRY,
+    EXPR_PATTERN,
+
+    // Expressions
+    LITERAL,
+    NAME_REF,
+    SELF_EXPR,
+    UNARY_EXPR,
+    BINARY_EXPR,
+    /// `a if condition else b`
+    TERNARY_EXPR,
+    /// `=` and the compound assignments.
+    ASSIGNMENT,
+    AWAIT_EXPR,
+    ARRAY,
+    DICT,
+    DICT_ENTRY,
+    /// `(expression)`
+    PAREN_EXPR,
+    /// `base.name`
+    ATTRIBUTE,
+    /// `base[index]`
+    SUBSCRIPT,
+    /// `value as Type`
+    CAST,
+    /// `callee(args)`, `super(args)` and `super.name(args)`.
+    CALL,
+    ARG_LIST,
+    /// `$Path`, `$"Path"`, `%Unique`, `$%A/%B`.
+    GET_NODE,
+    PRELOAD,
+    LAMBDA,
+    /// `value is Type` and `value is not Type`.
+    TYPE_TEST,
 }
 
 impl SyntaxKind {

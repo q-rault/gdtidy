@@ -1,12 +1,13 @@
 //! GDScript syntax trees and syntax errors, shared by the gdsuite tools.
 //!
-//! [`parse`] still uses tree-sitter-gdscript while the parser translated from
-//! Godot is being written (see `rfcs/0001-gdsyntax-parser.md`). Its first part
-//! is done: [`lexer`], a port of Godot 4.7's tokenizer, and [`lossless_tree`],
-//! which keeps every byte of a file in a tree of tokens.
+//! [`parser::parse`] is a port of Godot 4.7's GDScript parser that builds a
+//! lossless tree, on top of [`lexer`], a port of its tokenizer (see
+//! `rfcs/0001-gdsyntax-parser.md`). [`parse`] still uses tree-sitter-gdscript
+//! until gdtidy moves to the new parser.
 
 pub mod kind;
 pub mod lexer;
+pub mod parser;
 
 pub use kind::{GDScript, SyntaxKind};
 pub use tree_sitter::{Node, Tree, TreeCursor};

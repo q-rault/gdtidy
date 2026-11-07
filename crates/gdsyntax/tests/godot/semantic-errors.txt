@@ -1,0 +1,17 @@
+# Godot parser errors that gdsyntax does not report, one message part per
+# line (matched anywhere in the message). They need scope tracking or annotation bookkeeping, so they are left
+# to Godot itself (gdtypecheck). Check this list when syncing a Godot version.
+
+# A name declared twice in a class or a block.
+There is already a
+has the same name as a previously declared
+Parameter with name
+Name "
+Bind variable name "
+There's already a
+
+# Script annotations applied twice.
+annotation can only be used once.
+
+# @warning_ignore_start and @warning_ignore_restore bookkeeping.
+Warning "

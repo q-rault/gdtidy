@@ -1,6 +1,6 @@
 # RFC 0001: A GDScript parser written from scratch for gdsyntax
 
-Status: accepted, 2026-11-07. M1 done. Target: Godot 4.7, compatible with the 4.8 beta.
+Status: accepted, 2026-11-07. M1 to M4 done (M2 to M4 landed together: class level, statements and expressions depend on each other). Target: Godot 4.7, compatible with the 4.8 beta.
 
 ## Summary
 

@@ -3,7 +3,7 @@
 //! like `PATH`) and every `.gd` file under them must:
 //!
 //! - round-trip byte for byte through the tree, and
-//! - get no tokenizer error, since real projects only contain code Godot
+//! - parse without errors, since real projects only contain code Godot
 //!   loads. Folders known to hold invalid scripts on purpose can be left out
 //!   with `GDSYNTAX_CORPUS_EXCLUDE`, a comma-separated list of path fragments.
 //!
@@ -38,7 +38,7 @@ fn gd_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn corpus_round_trips_without_tokenizer_errors() {
+fn corpus_round_trips_without_errors() {
     let Some(roots) = std::env::var_os("GDSYNTAX_CORPUS") else {
         eprintln!("GDSYNTAX_CORPUS is not set; skipping");
         return;
@@ -67,8 +67,10 @@ fn corpus_round_trips_without_tokenizer_errors() {
         };
         lines += source.lines().count();
         let start = Instant::now();
-        let (tree, errors) = gdsyntax::lossless_tree(&source);
+        let parse = gdsyntax::parser::parse(&source);
         elapsed += start.elapsed();
+        let tree = gdsyntax::SyntaxNode::new_root(parse.green);
+        let errors = parse.errors;
         if tree.to_string() != source {
             failures.push(format!(
                 "{}: the tree does not reproduce the source",
@@ -81,7 +83,7 @@ fn corpus_round_trips_without_tokenizer_errors() {
         }
     }
     eprintln!(
-        "{} files, {lines} lines, tokenized in {elapsed:.1?}, {} problems",
+        "{} files, {lines} lines, parsed in {elapsed:.1?}, {} problems",
         files.len(),
         failures.len()
     );

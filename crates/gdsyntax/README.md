@@ -17,7 +17,8 @@ for member in tree.file().members() {
 ```
 
 - `parse` returns the tree and the errors, in the order Godot reports them. Lines and columns are 1-based, and columns count characters, not bytes.
-- `ast` gives typed access to declarations, statements and expressions. Every accessor returns an `Option`, because a file with errors still has a tree.
+- `ast` gives typed access to the whole tree: declarations, statements, expressions, match patterns and annotations, with typed operators. Every accessor returns an `Option`, because a file with errors still has a tree; code the parser could not read is kept in `Error` nodes.
+- `literal` decodes literal values the way Godot does: string escapes, raw strings, `&"name"`, `^"path"`, and hexadecimal, binary and `1_000` numbers.
 - The tree is a [`rowan`](https://crates.io/crates/rowan) tree.
 
 ## What it checks
@@ -28,6 +29,7 @@ Syntax only. Godot's parser also reports some errors that need scope information
 
 - **Godot's own test scripts** for 4.7 (in `tests/godot`): every script Godot parses parses with no error, and every script Godot rejects gets Godot's first error message, apart from the cases above.
 - **Real projects**: `GDSYNTAX_CORPUS=<folders> cargo test -p gdsyntax --test corpus` checks that every file round-trips and parses without errors.
+- **Typed tree**: on every valid script, every node of the tree is reachable through `ast` alone (`tests/typed_tree.rs`; it also runs on `GDSYNTAX_CORPUS`).
 - **Broken input**: random edits to valid files must never make the parser panic, hang or lose a byte.
 
 ## License

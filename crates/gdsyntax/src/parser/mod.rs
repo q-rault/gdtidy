@@ -398,9 +398,12 @@ impl<'s> Parser<'s> {
     /// of a statement or declaration.
     fn synchronize(&mut self) {
         self.panic_mode = false;
+        // The tokens skipped go in one ERROR node, so a tool reading the tree
+        // can tell unreadable code from code that is not there.
+        let mut skipping = false;
         while !self.is_at_end() {
             if matches!(self.previous, NEWLINE | SEMICOLON) {
-                return;
+                break;
             }
             if matches!(
                 self.current,
@@ -416,9 +419,16 @@ impl<'s> Parser<'s> {
                     | RETURN_KW
                     | ANNOTATION
             ) {
-                return;
+                break;
+            }
+            if !skipping {
+                self.start(ERROR);
+                skipping = true;
             }
             self.advance();
+        }
+        if skipping {
+            self.finish_node();
         }
     }
 

@@ -2,9 +2,19 @@
 //! and expression, with accessors for their parts.
 //!
 //! Every accessor returns an `Option` or an iterator, because a file with
-//! errors still has a tree and any part of it may be missing.
+//! errors still has a tree and any part of it may be missing. Code the
+//! parser could not read is kept in [`Error`] nodes, which appear as the
+//! `Error` variant of [`Member`], [`Stmt`], [`Expr`] and [`Pattern`].
+//!
+//! On a file without errors, every node of the tree is reachable from
+//! [`SourceFile`] through these accessors, except three list nodes whose
+//! items are returned directly: `RETURN_TYPE` (see [`Func::return_type`]),
+//! `TYPE_ARGS` ([`Type::arguments`]) and `ANNOTATION_ARGS`
+//! ([`Annotation::arguments`]). The `typed_tree` test checks this on all of
+//! Godot's test scripts.
 
 use crate::SyntaxKind::{self, *};
+use crate::literal::{self, LiteralValue};
 use crate::{SyntaxNode, SyntaxToken, parser};
 
 /// A typed view of a node of one kind.
@@ -95,6 +105,22 @@ ast_node! {
     PreloadExpr => PRELOAD,
     LambdaExpr => LAMBDA,
     TypeTestExpr => TYPE_TEST,
+    SelfExpr => SELF_EXPR,
+    /// Code the parser could not read, after a syntax error.
+    Error => ERROR,
+    /// The `when` guard of a match branch.
+    PatternGuard => PATTERN_GUARD,
+    /// `var name` in a pattern.
+    BindPattern => BIND_PATTERN,
+    /// `_`.
+    WildcardPattern => WILDCARD_PATTERN,
+    /// `..` at the end of an array or dictionary pattern.
+    RestPattern => REST_PATTERN,
+    ArrayPattern => ARRAY_PATTERN,
+    DictPattern => DICT_PATTERN,
+    DictPatternEntry => DICT_PATTERN_ENTRY,
+    /// A literal, a constant name or another expression to compare with.
+    ExprPattern => EXPR_PATTERN,
 }
 
 // ---- Helpers ----
@@ -123,6 +149,15 @@ fn name_token(node: &SyntaxNode) -> Option<SyntaxToken> {
 
 fn has_token(node: &SyntaxNode, kind: SyntaxKind) -> bool {
     token(node, kind).is_some()
+}
+
+/// The first non-trivia token directly in `node` after a `kind` token.
+fn token_after(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia())
+        .skip_while(|token| token.kind() != kind)
+        .nth(1)
 }
 
 /// The `##` documentation comment lines just before `node`, in order, with
@@ -160,6 +195,11 @@ pub enum Member {
     Enum(Enum),
     Func(Func),
     Class(Class),
+    /// A string used as a comment.
+    StringStatement(StringStatement),
+    /// `pass`, as in an empty inner class.
+    Pass(PassStmt),
+    Error(Error),
 }
 
 impl Member {
@@ -171,6 +211,9 @@ impl Member {
             ENUM => Member::Enum(Enum(node)),
             FUNC => Member::Func(Func(node)),
             CLASS => Member::Class(Class(node)),
+            STRING_STATEMENT => Member::StringStatement(StringStatement(node)),
+            PASS_STMT => Member::Pass(PassStmt(node)),
+            ERROR => Member::Error(Error(node)),
             _ => return None,
         })
     }
@@ -183,12 +226,19 @@ impl Member {
             Member::Enum(n) => n.syntax(),
             Member::Func(n) => n.syntax(),
             Member::Class(n) => n.syntax(),
+            Member::StringStatement(n) => n.syntax(),
+            Member::Pass(n) => n.syntax(),
+            Member::Error(n) => n.syntax(),
         }
     }
 
-    /// The member's name; an unnamed enum has none.
+    /// The member's name; an unnamed enum, a string statement, `pass` and an
+    /// error have none.
     pub fn name(&self) -> Option<SyntaxToken> {
-        name_token(self.syntax())
+        match self {
+            Member::StringStatement(_) | Member::Pass(_) | Member::Error(_) => None,
+            _ => name_token(self.syntax()),
+        }
     }
 
     pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
@@ -210,7 +260,8 @@ impl SourceFile {
         child(&self.0).or_else(|| self.class_name().and_then(|c| c.extends()))
     }
 
-    /// Annotations that apply to the script, such as `@tool`.
+    /// Annotations that apply to the script, such as `@tool`, and those on
+    /// their own line, such as `@warning_ignore_start`.
     pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
         children(&self.0)
     }
@@ -246,6 +297,10 @@ impl Extends {
 }
 
 impl Class {
+    pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
+        children(&self.0)
+    }
+
     pub fn name(&self) -> Option<SyntaxToken> {
         name_token(&self.0)
     }
@@ -262,6 +317,11 @@ impl Class {
 impl ClassBody {
     pub fn members(&self) -> impl Iterator<Item = Member> {
         self.0.children().filter_map(Member::cast)
+    }
+
+    /// Annotations on their own line, such as `@warning_ignore_start`.
+    pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
+        children(&self.0)
     }
 }
 
@@ -342,9 +402,19 @@ impl Property {
 }
 
 impl Setter {
-    /// The body of an inline setter, `set(value): ...`.
+    /// The parameter list of an inline setter, `set(value): ...`.
+    pub fn params(&self) -> Option<ParamList> {
+        child(&self.0)
+    }
+
+    /// The body of an inline setter.
     pub fn body(&self) -> Option<Suite> {
         child(&self.0)
+    }
+
+    /// The function named in `set = function`.
+    pub fn function(&self) -> Option<SyntaxToken> {
+        token_after(&self.0, EQUAL)
     }
 }
 
@@ -352,6 +422,22 @@ impl Getter {
     /// The body of an inline getter, `get: ...`.
     pub fn body(&self) -> Option<Suite> {
         child(&self.0)
+    }
+
+    /// The function named in `get = function`.
+    pub fn function(&self) -> Option<SyntaxToken> {
+        token_after(&self.0, EQUAL)
+    }
+}
+
+impl StringStatement {
+    pub fn token(&self) -> Option<SyntaxToken> {
+        token(&self.0, STRING)
+    }
+
+    /// The string's contents, decoded.
+    pub fn value(&self) -> Option<String> {
+        literal::string_value(self.token()?.text())
     }
 }
 
@@ -473,6 +559,9 @@ pub enum Stmt {
     While(WhileStmt),
     Match(MatchStmt),
     Assert(AssertStmt),
+    /// An annotation on its own line, such as `@warning_ignore_start`.
+    Annotation(Annotation),
+    Error(Error),
 }
 
 impl Stmt {
@@ -491,6 +580,8 @@ impl Stmt {
             WHILE_STMT => Stmt::While(WhileStmt(node)),
             MATCH_STMT => Stmt::Match(MatchStmt(node)),
             ASSERT_STMT => Stmt::Assert(AssertStmt(node)),
+            ANNOTATION_NODE => Stmt::Annotation(Annotation(node)),
+            ERROR => Stmt::Error(Error(node)),
             _ => return None,
         })
     }
@@ -510,7 +601,15 @@ impl Stmt {
             Stmt::While(n) => n.syntax(),
             Stmt::Match(n) => n.syntax(),
             Stmt::Assert(n) => n.syntax(),
+            Stmt::Annotation(n) => n.syntax(),
+            Stmt::Error(n) => n.syntax(),
         }
+    }
+
+    /// The annotations on the statement, such as `@warning_ignore`.
+    pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
+        let own = !matches!(self, Stmt::Annotation(_));
+        children(self.syntax()).filter(move |_| own)
     }
 }
 
@@ -604,19 +703,126 @@ impl MatchStmt {
         self.0.children().find_map(Expr::cast)
     }
 
+    /// A `pass` in place of the branches.
+    pub fn pass(&self) -> Option<PassStmt> {
+        child(&self.0)
+    }
+
     pub fn branches(&self) -> impl Iterator<Item = MatchBranch> {
         children(&self.0)
     }
 }
 
 impl MatchBranch {
-    pub fn body(&self) -> Option<Suite> {
+    pub fn annotations(&self) -> impl Iterator<Item = Annotation> {
+        children(&self.0)
+    }
+
+    /// The patterns, as in `1, 2, 3:`.
+    pub fn patterns(&self) -> impl Iterator<Item = Pattern> {
+        self.0.children().filter_map(Pattern::cast)
+    }
+
+    /// The `when` guard.
+    pub fn guard(&self) -> Option<PatternGuard> {
         child(&self.0)
     }
 
     /// Whether the branch has a `when` guard.
     pub fn has_guard(&self) -> bool {
-        self.0.children().any(|n| n.kind() == PATTERN_GUARD)
+        self.guard().is_some()
+    }
+
+    pub fn body(&self) -> Option<Suite> {
+        child(&self.0)
+    }
+}
+
+impl PatternGuard {
+    pub fn condition(&self) -> Option<Expr> {
+        exprs(&self.0).next()
+    }
+}
+
+// ---- Patterns ----
+
+/// A pattern in a match branch.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Pattern {
+    Expr(ExprPattern),
+    Bind(BindPattern),
+    Wildcard(WildcardPattern),
+    Rest(RestPattern),
+    Array(ArrayPattern),
+    Dict(DictPattern),
+    Error(Error),
+}
+
+impl Pattern {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        Some(match node.kind() {
+            EXPR_PATTERN => Pattern::Expr(ExprPattern(node)),
+            BIND_PATTERN => Pattern::Bind(BindPattern(node)),
+            WILDCARD_PATTERN => Pattern::Wildcard(WildcardPattern(node)),
+            REST_PATTERN => Pattern::Rest(RestPattern(node)),
+            ARRAY_PATTERN => Pattern::Array(ArrayPattern(node)),
+            DICT_PATTERN => Pattern::Dict(DictPattern(node)),
+            ERROR => Pattern::Error(Error(node)),
+            _ => return None,
+        })
+    }
+
+    pub fn syntax(&self) -> &SyntaxNode {
+        match self {
+            Pattern::Expr(n) => n.syntax(),
+            Pattern::Bind(n) => n.syntax(),
+            Pattern::Wildcard(n) => n.syntax(),
+            Pattern::Rest(n) => n.syntax(),
+            Pattern::Array(n) => n.syntax(),
+            Pattern::Dict(n) => n.syntax(),
+            Pattern::Error(n) => n.syntax(),
+        }
+    }
+}
+
+impl ExprPattern {
+    pub fn expr(&self) -> Option<Expr> {
+        exprs(&self.0).next()
+    }
+}
+
+impl BindPattern {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        name_token(&self.0)
+    }
+}
+
+impl ArrayPattern {
+    /// The element patterns, the closing `..` included.
+    pub fn elements(&self) -> impl Iterator<Item = Pattern> {
+        self.0.children().filter_map(Pattern::cast)
+    }
+}
+
+impl DictPattern {
+    pub fn entries(&self) -> impl Iterator<Item = DictPatternEntry> {
+        children(&self.0)
+    }
+
+    /// The closing `..`, which matches any other keys.
+    pub fn rest(&self) -> Option<RestPattern> {
+        child(&self.0)
+    }
+}
+
+impl DictPatternEntry {
+    pub fn key(&self) -> Option<Expr> {
+        exprs(&self.0).next()
+    }
+
+    /// The value pattern; `None` in `{"key", ..}`, which only checks the key.
+    pub fn value(&self) -> Option<Pattern> {
+        self.0.children().find_map(Pattern::cast)
     }
 }
 
@@ -633,7 +839,7 @@ impl AssertStmt {
 pub enum Expr {
     Literal(Literal),
     Name(NameRef),
-    SelfExpr(SyntaxNode),
+    SelfExpr(SelfExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
     Ternary(TernaryExpr),
@@ -650,6 +856,7 @@ pub enum Expr {
     Preload(PreloadExpr),
     Lambda(LambdaExpr),
     TypeTest(TypeTestExpr),
+    Error(Error),
 }
 
 impl Expr {
@@ -657,7 +864,7 @@ impl Expr {
         Some(match node.kind() {
             LITERAL => Expr::Literal(Literal(node)),
             NAME_REF => Expr::Name(NameRef(node)),
-            SELF_EXPR => Expr::SelfExpr(node),
+            SELF_EXPR => Expr::SelfExpr(SelfExpr(node)),
             UNARY_EXPR => Expr::Unary(UnaryExpr(node)),
             BINARY_EXPR => Expr::Binary(BinaryExpr(node)),
             TERNARY_EXPR => Expr::Ternary(TernaryExpr(node)),
@@ -674,6 +881,7 @@ impl Expr {
             PRELOAD => Expr::Preload(PreloadExpr(node)),
             LAMBDA => Expr::Lambda(LambdaExpr(node)),
             TYPE_TEST => Expr::TypeTest(TypeTestExpr(node)),
+            ERROR => Expr::Error(Error(node)),
             _ => return None,
         })
     }
@@ -682,7 +890,7 @@ impl Expr {
         match self {
             Expr::Literal(n) => n.syntax(),
             Expr::Name(n) => n.syntax(),
-            Expr::SelfExpr(n) => n,
+            Expr::SelfExpr(n) => n.syntax(),
             Expr::Unary(n) => n.syntax(),
             Expr::Binary(n) => n.syntax(),
             Expr::Ternary(n) => n.syntax(),
@@ -699,6 +907,7 @@ impl Expr {
             Expr::Preload(n) => n.syntax(),
             Expr::Lambda(n) => n.syntax(),
             Expr::TypeTest(n) => n.syntax(),
+            Expr::Error(n) => n.syntax(),
         }
     }
 }
@@ -719,6 +928,25 @@ impl Literal {
     pub fn token(&self) -> Option<SyntaxToken> {
         operator(&self.0)
     }
+
+    /// The decoded value. `None` for a malformed literal, or an integer that
+    /// does not fit in 64 bits. `PI`, `TAU`, `INF` and `NAN` are names, not
+    /// literals, as in Godot.
+    pub fn value(&self) -> Option<LiteralValue> {
+        let token = self.token()?;
+        let text = token.text();
+        Some(match token.kind() {
+            INT => LiteralValue::Int(literal::int_value(text)?),
+            FLOAT => LiteralValue::Float(literal::float_value(text)?),
+            STRING => LiteralValue::String(literal::string_value(text)?),
+            STRING_NAME => LiteralValue::StringName(literal::string_value(text)?),
+            NODE_PATH => LiteralValue::NodePath(literal::string_value(text)?),
+            TRUE_KW => LiteralValue::Bool(true),
+            FALSE_KW => LiteralValue::Bool(false),
+            NULL_KW => LiteralValue::Null,
+            _ => return None,
+        })
+    }
 }
 
 impl NameRef {
@@ -730,6 +958,16 @@ impl NameRef {
 impl UnaryExpr {
     pub fn operator(&self) -> Option<SyntaxToken> {
         operator(&self.0)
+    }
+
+    pub fn op(&self) -> Option<UnaryOp> {
+        Some(match self.operator()?.kind() {
+            MINUS => UnaryOp::Negate,
+            PLUS => UnaryOp::Plus,
+            TILDE => UnaryOp::BitNot,
+            NOT_KW | BANG => UnaryOp::Not,
+            _ => return None,
+        })
     }
 
     pub fn operand(&self) -> Option<Expr> {
@@ -746,9 +984,37 @@ impl BinaryExpr {
         exprs(&self.0).nth(1)
     }
 
-    /// The operator; for `not in`, the `not`.
+    /// The operator token; for `not in`, the `not`.
     pub fn operator(&self) -> Option<SyntaxToken> {
         operator(&self.0)
+    }
+
+    pub fn op(&self) -> Option<BinaryOp> {
+        use BinaryOp::*;
+        Some(match self.operator()?.kind() {
+            PLUS => Add,
+            MINUS => Subtract,
+            STAR => Multiply,
+            SLASH => Divide,
+            PERCENT => Modulo,
+            STAR_STAR => Power,
+            LESS_LESS => ShiftLeft,
+            GREATER_GREATER => ShiftRight,
+            AMPERSAND => BitAnd,
+            PIPE => BitOr,
+            CARET => BitXor,
+            AND_KW | AMPERSAND_AMPERSAND => And,
+            OR_KW | PIPE_PIPE => Or,
+            EQUAL_EQUAL => Equal,
+            BANG_EQUAL => NotEqual,
+            LESS => Less,
+            LESS_EQUAL => LessEqual,
+            GREATER => Greater,
+            GREATER_EQUAL => GreaterEqual,
+            IN_KW => In,
+            NOT_KW => NotIn,
+            _ => return None,
+        })
     }
 }
 
@@ -777,6 +1043,25 @@ impl Assignment {
 
     pub fn operator(&self) -> Option<SyntaxToken> {
         operator(&self.0)
+    }
+
+    pub fn op(&self) -> Option<AssignOp> {
+        use AssignOp::*;
+        Some(match self.operator()?.kind() {
+            EQUAL => Assign,
+            PLUS_EQUAL => Add,
+            MINUS_EQUAL => Subtract,
+            STAR_EQUAL => Multiply,
+            STAR_STAR_EQUAL => Power,
+            SLASH_EQUAL => Divide,
+            PERCENT_EQUAL => Modulo,
+            LESS_LESS_EQUAL => ShiftLeft,
+            GREATER_GREATER_EQUAL => ShiftRight,
+            AMPERSAND_EQUAL => BitAnd,
+            PIPE_EQUAL => BitOr,
+            CARET_EQUAL => BitXor,
+            _ => return None,
+        })
     }
 }
 
@@ -856,6 +1141,32 @@ impl CastExpr {
     }
 }
 
+impl GetNodeExpr {
+    /// Whether this is a scene-unique name, `%Name`, rather than `$Path`.
+    pub fn is_unique(&self) -> bool {
+        has_token(&self.0, PERCENT)
+    }
+
+    /// The node path, as Godot reads it: `$Path/To` and `$"Path/To"` both
+    /// give `Path/To`.
+    pub fn path(&self) -> Option<String> {
+        let mut path = String::new();
+        for token in self
+            .0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| !t.kind().is_trivia() && !matches!(t.kind(), DOLLAR | PERCENT))
+        {
+            if token.kind() == STRING {
+                path.push_str(&literal::string_value(token.text())?);
+            } else {
+                path.push_str(token.text());
+            }
+        }
+        Some(path)
+    }
+}
+
 impl CallExpr {
     /// What is called; `None` for `super(...)` and `super.name(...)`.
     pub fn callee(&self) -> Option<Expr> {
@@ -866,8 +1177,12 @@ impl CallExpr {
         has_token(&self.0, SUPER_KW)
     }
 
+    pub fn arg_list(&self) -> Option<ArgList> {
+        child(&self.0)
+    }
+
     pub fn arguments(&self) -> impl Iterator<Item = Expr> {
-        child::<ArgList>(&self.0)
+        self.arg_list()
             .into_iter()
             .flat_map(|args| exprs(&args.0).collect::<Vec<_>>())
     }
@@ -880,8 +1195,12 @@ impl ArgList {
 }
 
 impl PreloadExpr {
+    pub fn arg_list(&self) -> Option<ArgList> {
+        child(&self.0)
+    }
+
     pub fn path(&self) -> Option<Expr> {
-        child::<ArgList>(&self.0).and_then(|args| exprs(&args.0).next())
+        self.arg_list().and_then(|args| exprs(&args.0).next())
     }
 }
 
@@ -892,6 +1211,10 @@ impl LambdaExpr {
 
     pub fn params(&self) -> Option<ParamList> {
         child(&self.0)
+    }
+
+    pub fn return_type(&self) -> Option<Type> {
+        child::<ReturnType>(&self.0).and_then(|r| child(&r.0))
     }
 
     pub fn body(&self) -> Option<Suite> {
@@ -911,6 +1234,64 @@ impl TypeTestExpr {
     pub fn tested_type(&self) -> Option<Type> {
         child(&self.0)
     }
+}
+
+// ---- Operators ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnaryOp {
+    /// `-x`
+    Negate,
+    /// `+x`
+    Plus,
+    /// `~x`
+    BitNot,
+    /// `not x` or `!x`
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Power,
+    ShiftLeft,
+    ShiftRight,
+    BitAnd,
+    BitOr,
+    BitXor,
+    /// `and` or `&&`
+    And,
+    /// `or` or `||`
+    Or,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    In,
+    NotIn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AssignOp {
+    /// `=`
+    Assign,
+    Add,
+    Subtract,
+    Multiply,
+    Power,
+    Divide,
+    Modulo,
+    ShiftLeft,
+    ShiftRight,
+    BitAnd,
+    BitOr,
+    BitXor,
 }
 
 #[cfg(test)]

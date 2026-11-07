@@ -22,6 +22,7 @@
 pub mod ast;
 pub mod kind;
 pub mod lexer;
+pub mod literal;
 pub mod parser;
 
 pub use kind::{GDScript, SyntaxKind};

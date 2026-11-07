@@ -2,7 +2,7 @@
 
 Formats and lints GDScript, following the [official Godot style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html). It is one fast binary with no Python, and is meant to replace `gdformat` and `gdlint` in [gdsuite](https://github.com/q-rault/gdsuite).
 
-> **Status: early.** `gdtidy lint` finds the files to check and reports files it cannot parse. Style rules and `gdtidy fmt` are not written yet.
+> **Status: early.** `gdtidy lint` finds the files to check and reports files it cannot parse, with Godot's error message. Style rules and `gdtidy fmt` are not written yet.
 
 ## Install
 
@@ -54,7 +54,7 @@ Line breaks you write inside brackets are kept, so a list you split stays split.
 | Crate | What it is |
 | --- | --- |
 | [`gdtidy`](crates/gdtidy) | The command-line tool |
-| [`gdsyntax`](crates/gdsyntax) | GDScript syntax trees, built on tree-sitter-gdscript, shared with the other gdsuite tools |
+| [`gdsyntax`](crates/gdsyntax) | A GDScript parser translated from Godot's own, with a lossless tree, shared with the other gdsuite tools |
 
 ## License
 

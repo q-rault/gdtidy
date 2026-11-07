@@ -119,8 +119,10 @@ const MAX_DEPTH: u32 = 256;
 pub(crate) struct Parser<'s> {
     src: &'s str,
     lexer: Lexer<'s>,
-    /// Tokens read but not yet in the tree: trivia, then the current token.
+    /// Tokens read but not yet in the tree: trivia, the current token at
+    /// `current_index`, and trivia read past it.
     buf: Vec<Token>,
+    current_index: usize,
     /// Byte offset of `buf[0]`.
     buf_start: usize,
     current: SyntaxKind,
@@ -168,6 +170,7 @@ impl<'s> Parser<'s> {
             src,
             lexer: Lexer::new(src),
             buf: Vec::new(),
+            current_index: 0,
             buf_start: 0,
             current: EOF,
             current_start: 0,
@@ -241,17 +244,18 @@ impl<'s> Parser<'s> {
             if kind == ERROR_TOKEN {
                 continue;
             }
-            let buffered: usize = self.buf.iter().map(|t| t.len as usize).sum();
-            let end = self.buf_start + buffered;
             self.current = kind;
-            if kind == EOF {
-                self.current_start = end;
-                self.current_end = end;
-            } else {
-                let len = self.buf.last().map_or(0, |t| t.len as usize);
-                self.current_start = end - len;
-                self.current_end = end;
-            }
+            self.current_index = self.lexer.significant_index().min(self.buf.len());
+            let before: usize = self.buf[..self.current_index]
+                .iter()
+                .map(|t| t.len as usize)
+                .sum();
+            self.current_start = self.buf_start + before;
+            self.current_end = self.current_start
+                + self
+                    .buf
+                    .get(self.current_index)
+                    .map_or(0, |t| t.len as usize);
             return;
         }
     }
@@ -276,8 +280,11 @@ impl<'s> Parser<'s> {
 
     /// Put the tokens before the current one into the tree.
     fn flush_before_current(&mut self) {
-        let keep = if self.current == EOF { 0 } else { 1 };
-        let n = self.buf.len().saturating_sub(keep);
+        let n = if self.current == EOF {
+            self.buf.len()
+        } else {
+            self.current_index
+        };
         self.flush(n);
     }
 
@@ -288,6 +295,7 @@ impl<'s> Parser<'s> {
                 .token(token.kind.into(), &self.src[self.buf_start..end]);
             self.buf_start = end;
         }
+        self.current_index = self.current_index.saturating_sub(n);
     }
 
     /// Godot's `advance`: the current token goes into the tree and the next
@@ -297,7 +305,8 @@ impl<'s> Parser<'s> {
         if self.current == EOF {
             return EOF;
         }
-        let n = self.buf.len();
+        // The current token goes in; trivia read past it waits for the next.
+        let n = (self.current_index + 1).min(self.buf.len());
         self.flush(n);
         self.previous = self.current;
         self.previous_start = self.current_start;
@@ -313,11 +322,12 @@ impl<'s> Parser<'s> {
         if self.current == EOF {
             return;
         }
-        if let Some(last) = self.buf.last_mut() {
-            if last.len == 0 {
-                self.buf.pop();
+        let index = self.current_index;
+        if let Some(token) = self.buf.get_mut(index) {
+            if token.len == 0 {
+                self.buf.remove(index);
             } else {
-                last.kind = LINE_BREAK;
+                token.kind = LINE_BREAK;
             }
         }
         self.scan();
@@ -509,15 +519,19 @@ impl<'s> Parser<'s> {
     /// when the input is nested too deeply to follow.
     fn enter(&mut self) -> bool {
         if self.depth >= MAX_DEPTH {
-            if !self.too_deep_reported {
-                self.too_deep_reported = true;
-                let (start, end) = (self.current_start, self.current_end);
-                self.push_error_at("The code is nested too deeply to parse.", start, end);
-            }
+            self.report_too_deep();
             return false;
         }
         self.depth += 1;
         true
+    }
+
+    fn report_too_deep(&mut self) {
+        if !self.too_deep_reported {
+            self.too_deep_reported = true;
+            let (start, end) = (self.current_start, self.current_end);
+            self.push_error_at("The code is nested too deeply to parse.", start, end);
+        }
     }
 
     fn leave(&mut self) {

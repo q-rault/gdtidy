@@ -197,3 +197,47 @@ fn deep_nesting_is_reported_not_overflowed() {
             .any(|e| e.message.contains("nested too deeply"))
     );
 }
+
+/// Windows gives the main thread 1 MiB of stack. Deeply nested input must
+/// stop at the depth limit well before that runs out.
+#[test]
+fn deep_nesting_fits_in_a_one_mebibyte_stack() {
+    let inputs = [
+        format!("var x = {}1{}\n", "(".repeat(10_000), ")".repeat(10_000)),
+        format!("var x = {}1{}\n", "[".repeat(10_000), "]".repeat(10_000)),
+        format!("var x = {}1\n", "-".repeat(10_000)),
+        format!("var x = {}1{}\n", "f(".repeat(10_000), ")".repeat(10_000)),
+        format!("var x = {}\n", "func(): return ".repeat(2_000) + "1"),
+        {
+            let mut src = String::from("func f():\n");
+            for depth in 1..2_000 {
+                src += &"\t".repeat(depth);
+                src += "if x:\n";
+            }
+            src += &"\t".repeat(2_000);
+            src += "pass\n";
+            src
+        },
+        format!(
+            "func f(x):\n\tmatch x:\n\t\t{}1{}:\n\t\t\tpass\n",
+            "[".repeat(10_000),
+            "]".repeat(10_000)
+        ),
+        format!(
+            "var x: {}int{}\n",
+            "Array[".repeat(10_000),
+            "]".repeat(10_000)
+        ),
+    ];
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || {
+            for src in &inputs {
+                let parse = parse(src);
+                assert_eq!(SyntaxNode::new_root(parse.green).to_string(), *src);
+            }
+        })
+        .unwrap()
+        .join()
+        .expect("parsing must not overflow a 1 MiB stack");
+}

@@ -79,6 +79,8 @@ pub struct Lexer<'a> {
     reached_end: bool,
     /// Whether errors recorded now are held back (see [`LexError::deferred`]).
     defer_errors: bool,
+    /// Index in the output of the token the last `scan` returned.
+    significant_index: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -101,6 +103,7 @@ impl<'a> Lexer<'a> {
             bom_len,
             reached_end: src.len() == bom_len,
             defer_errors: false,
+            significant_index: 0,
         }
     }
 
@@ -131,10 +134,26 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Where in `out` the token returned by the last [`Lexer::scan`] is.
+    /// Usually the last token, but a `NEWLINE` can be followed by the blank
+    /// and comment lines Godot reads past before returning it. At the end of
+    /// the input it is `out.len()`.
+    pub fn significant_index(&self) -> usize {
+        self.significant_index
+    }
+
     /// Godot's `scan`: read the next token the parser sees, appending it to
-    /// `out` after any trivia before it, and return its kind. At the end of
+    /// `out` with the trivia around it, and return its kind. At the end of
     /// the input, appends any remaining trivia and returns [`SyntaxKind::EOF`].
     pub fn scan(&mut self, out: &mut Vec<Token>) -> SyntaxKind {
+        let kind = self.scan_token(out);
+        if kind == EOF {
+            self.significant_index = out.len();
+        }
+        kind
+    }
+
+    fn scan_token(&mut self, out: &mut Vec<Token>) -> SyntaxKind {
         if self.pos == 0 && self.bom_len > 0 {
             self.pos = self.bom_len;
             out.push(Token {
@@ -156,11 +175,17 @@ impl<'a> Lexer<'a> {
                 }
                 // In multiline mode the line break stays trivia.
                 match pending {
-                    PendingNewline::At(index) => out[index].kind = NEWLINE,
-                    PendingNewline::EndOfFile => out.push(Token {
-                        kind: NEWLINE,
-                        len: 0,
-                    }),
+                    PendingNewline::At(index) => {
+                        out[index].kind = NEWLINE;
+                        self.significant_index = index;
+                    }
+                    PendingNewline::EndOfFile => {
+                        self.significant_index = out.len();
+                        out.push(Token {
+                            kind: NEWLINE,
+                            len: 0,
+                        });
+                    }
                 }
                 return NEWLINE;
             }
@@ -173,6 +198,7 @@ impl<'a> Lexer<'a> {
                     self.pending_indents += 1;
                     DEDENT
                 };
+                self.significant_index = out.len();
                 out.push(Token { kind, len: 0 });
                 self.last_token = kind;
                 return kind;
@@ -212,6 +238,7 @@ impl<'a> Lexer<'a> {
             if kind == ERROR_TOKEN {
                 return self.finish_error_token(out);
             }
+            self.significant_index = out.len();
             out.push(Token {
                 kind,
                 len: (self.pos - self.token_start) as u32,
@@ -317,6 +344,7 @@ impl<'a> Lexer<'a> {
         if let Some(error) = self.errors.last_mut() {
             error.deferred = false;
         }
+        self.significant_index = out.len();
         out.push(Token {
             kind: ERROR_TOKEN,
             len: (self.pos - self.token_start) as u32,

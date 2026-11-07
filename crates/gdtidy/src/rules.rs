@@ -36,7 +36,7 @@ pub const PARSE_ERROR: Rule = Rule {
     id: "parse-error",
     concern: "unparsable-file",
     severity: Severity::Error,
-    summary: "The file could not be parsed, so it was not checked. Godot's own compile errors are gdtypecheck's to report.",
+    summary: "The file has a syntax error, so it was not checked. The message is Godot's; type errors and other compile errors are gdtypecheck's to report.",
 };
 
 pub const RULES: &[Rule] = &[PARSE_ERROR];

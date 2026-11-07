@@ -195,9 +195,17 @@ impl Parser<'_> {
         let checkpoint = self.checkpoint();
         let mut operand = self.parse_prefix(token, checkpoint, can_assign);
 
+        // Each operator wraps the expression so far one level deeper in the
+        // tree, so a long chain like `a.b.c...` counts toward the limit too.
+        let mut chain = 0;
         while precedence <= infix_precedence(self.current) {
             let left = operand?;
             if (stop_on_assign && self.current == EQUAL) || self.lambda_ended {
+                return Some(left);
+            }
+            chain += 1;
+            if self.depth + chain >= super::MAX_DEPTH {
+                self.report_too_deep();
                 return Some(left);
             }
             let op = self.current;

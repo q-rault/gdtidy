@@ -6,10 +6,10 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
+// No rule exists yet, so neither severity is used.
+#[allow(dead_code)]
 pub enum Severity {
     Error,
-    // Style rules will be warnings; none exists yet.
-    #[allow(dead_code)]
     Warning,
 }
 
@@ -32,11 +32,7 @@ pub struct Rule {
     pub summary: &'static str,
 }
 
-pub const PARSE_ERROR: Rule = Rule {
-    id: "parse-error",
-    concern: "unparsable-file",
-    severity: Severity::Error,
-    summary: "The file has a syntax error, so it was not checked. The message is Godot's; type errors and other compile errors are gdtypecheck's to report.",
-};
-
-pub const RULES: &[Rule] = &[PARSE_ERROR];
+/// No rule exists yet. Files that do not parse are not a rule: they are
+/// skipped and listed apart (see `lint::Skipped`), since syntax errors are
+/// Godot's to report and so belong to gdtypecheck.
+pub const RULES: &[Rule] = &[];

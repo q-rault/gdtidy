@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::rules::{PARSE_ERROR, Rule, Severity};
+use crate::rules::Severity;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
@@ -18,49 +18,61 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-impl Diagnostic {
-    fn new(path: &str, rule: Rule, error: &gdsyntax::SyntaxError) -> Self {
-        Diagnostic {
-            path: path.to_string(),
-            line: error.start.line,
-            column: error.start.column,
-            end_line: error.end.line,
-            end_column: error.end.column,
-            severity: rule.severity,
-            rule: rule.id,
-            message: error.message.clone(),
-        }
-    }
+/// A file gdtidy could not check. This is not a lint problem: a syntax error
+/// is Godot's to report, so gdtypecheck owns it. gdtidy only says the file was
+/// left out, with the reason, so a run is never silently incomplete.
+#[derive(Debug, Clone, Serialize)]
+pub struct Skipped {
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
+    pub reason: SkipReason,
+    pub message: String,
 }
 
-/// Lint one file's contents. A file that is not UTF-8 is reported and skipped,
-/// so one bad file does not stop the run.
-pub fn lint_file(path: &Path, bytes: Vec<u8>) -> Vec<Diagnostic> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkipReason {
+    /// The file has a syntax error. The message is Godot's.
+    SyntaxError,
+    /// The file is not UTF-8, which Godot refuses too.
+    NotUtf8,
+}
+
+/// What linting one file gave.
+pub enum Outcome {
+    Checked(Vec<Diagnostic>),
+    Skipped(Skipped),
+}
+
+/// Lint one file's contents.
+pub fn lint_file(path: &Path, bytes: Vec<u8>) -> Outcome {
     let shown = crate::discover::display_path(path);
     let source = match String::from_utf8(bytes) {
         Ok(source) => source,
         Err(error) => {
             let valid = &error.as_bytes()[..error.utf8_error().valid_up_to()];
             let before = String::from_utf8_lossy(valid);
-            let line = before.matches('\n').count() + 1;
-            let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-            return vec![Diagnostic {
+            return Outcome::Skipped(Skipped {
                 path: shown,
-                line,
-                column,
-                end_line: line,
-                end_column: column + 1,
-                severity: PARSE_ERROR.severity,
-                rule: PARSE_ERROR.id,
+                line: before.matches('\n').count() + 1,
+                column: before.rsplit('\n').next().unwrap_or("").chars().count() + 1,
+                reason: SkipReason::NotUtf8,
                 message: "the file is not valid UTF-8".to_string(),
-            }];
+            });
         }
     };
     let tree = gdsyntax::parse(source);
-    // A file that does not parse is reported once and not checked further:
-    // rules would only add noise on a broken tree.
-    tree.errors()
-        .first()
-        .map(|error| vec![Diagnostic::new(&shown, PARSE_ERROR, error)])
-        .unwrap_or_default()
+    // Rules would only add noise on a broken tree, so a file that does not
+    // parse is left out, with Godot's first message as the reason.
+    if let Some(error) = tree.errors().first() {
+        return Outcome::Skipped(Skipped {
+            path: shown,
+            line: error.start.line,
+            column: error.start.column,
+            reason: SkipReason::SyntaxError,
+            message: error.message.clone(),
+        });
+    }
+    Outcome::Checked(Vec::new())
 }

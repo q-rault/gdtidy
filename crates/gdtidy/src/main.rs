@@ -88,33 +88,43 @@ struct LintReport {
     version: u32,
     files: usize,
     diagnostics: Vec<lint::Diagnostic>,
+    /// Files that could not be checked, such as files with a syntax error.
+    skipped: Vec<lint::Skipped>,
+}
+
+/// Problems give 1; a file that could not be checked gives 2 (the check did
+/// not fully run), whether or not other files had problems.
+fn lint_exit_code(report: &LintReport) -> u8 {
+    if !report.skipped.is_empty() {
+        FAILED
+    } else if !report.diagnostics.is_empty() {
+        PROBLEMS
+    } else {
+        OK
+    }
 }
 
 fn run_lint(args: LintArgs) -> Result<u8> {
     let files = discover::gdscript_files(&args.paths)?;
-    let mut diagnostics = Vec::new();
+    let mut report = LintReport {
+        version: 1,
+        files: files.len(),
+        diagnostics: Vec::new(),
+        skipped: Vec::new(),
+    };
     for file in &files {
         let bytes = fs::read(file)
             .with_context(|| format!("cannot read {}", discover::display_path(file)))?;
-        diagnostics.extend(lint::lint_file(file, bytes));
+        match lint::lint_file(file, bytes) {
+            lint::Outcome::Checked(diagnostics) => report.diagnostics.extend(diagnostics),
+            lint::Outcome::Skipped(skipped) => report.skipped.push(skipped),
+        }
     }
 
     match args.format {
-        Format::Json => {
-            let report = LintReport {
-                version: 1,
-                files: files.len(),
-                diagnostics,
-            };
-            println!("{}", serde_json::to_string_pretty(&report)?);
-            return Ok(if report.diagnostics.is_empty() {
-                OK
-            } else {
-                PROBLEMS
-            });
-        }
+        Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
         Format::Text => {
-            for d in &diagnostics {
+            for d in &report.diagnostics {
                 println!(
                     "{}:{}:{}: {}[{}]: {}",
                     d.path,
@@ -125,14 +135,21 @@ fn run_lint(args: LintArgs) -> Result<u8> {
                     d.message
                 );
             }
-            eprintln!(
-                "gdtidy: {} problem(s) ({} files)",
-                diagnostics.len(),
-                files.len()
+            for s in &report.skipped {
+                eprintln!("{}:{}:{}: skipped: {}", s.path, s.line, s.column, s.message);
+            }
+            let mut summary = format!(
+                "gdtidy: {} problem(s) ({} files",
+                report.diagnostics.len(),
+                report.files
             );
+            if !report.skipped.is_empty() {
+                summary += &format!(", {} skipped", report.skipped.len());
+            }
+            eprintln!("{summary})");
         }
     }
-    Ok(if diagnostics.is_empty() { OK } else { PROBLEMS })
+    Ok(lint_exit_code(&report))
 }
 
 fn list_rules(args: RulesArgs) -> Result<u8> {

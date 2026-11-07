@@ -2,7 +2,7 @@
 
 Formats and lints GDScript, following the [official Godot style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html). It is one fast binary with no Python, and is meant to replace `gdformat` and `gdlint` in [gdsuite](https://github.com/q-rault/gdsuite).
 
-> **Status: early.** `gdtidy lint` finds the files to check and reports files it cannot parse, with Godot's error message. Style rules and `gdtidy fmt` are not written yet.
+> **Status: early.** `gdtidy lint` finds the files to check and parses them with Godot's own grammar. Style rules and `gdtidy fmt` are not written yet.
 
 ## Install
 
@@ -22,11 +22,13 @@ gdtidy fmt                   # not implemented yet
 
 When walking a folder, gdtidy skips hidden folders, `addons`, folders with a `.gdignore`, and nested Godot projects, as the editor does. A file or folder you name directly is always checked.
 
+A file with a syntax error is skipped, not reported as a problem: syntax errors are Godot's to report, so in gdsuite they come from gdtypecheck. gdtidy still lists the file and Godot's message on stderr (and under `skipped` in JSON), and exits with `2`, so a run that left files out never looks clean.
+
 | Exit code | Meaning |
 | --- | --- |
 | `0` | No problems |
 | `1` | Problems found |
-| `2` | The check could not run |
+| `2` | The check could not run, or some files could not be checked |
 
 ## Scope
 

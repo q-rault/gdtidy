@@ -33,31 +33,37 @@ fn lint_passes_on_valid_code() {
 }
 
 #[test]
-fn lint_reports_a_file_that_does_not_parse() {
-    let dir = project(&[("enemy/enemy.gd", BROKEN)]);
+fn a_file_that_does_not_parse_is_skipped_not_reported() {
+    let dir = project(&[("enemy/enemy.gd", BROKEN), ("ok.gd", VALID)]);
     gdtidy()
         .current_dir(dir.path())
         .arg("lint")
         .assert()
-        .code(1)
-        .stdout(predicate::str::starts_with("enemy/enemy.gd:3:"))
-        .stdout(predicate::str::contains("error[parse-error]"));
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("enemy/enemy.gd:3:"))
+        .stderr(predicate::str::contains(": skipped: "))
+        .stderr(predicate::str::contains(
+            "0 problem(s) (2 files, 1 skipped)",
+        ));
 }
 
 #[test]
-fn lint_json_lists_diagnostics() {
+fn lint_json_lists_skipped_files_apart() {
     let dir = project(&[("a.gd", BROKEN), ("b.gd", VALID)]);
     let output = gdtidy()
         .current_dir(dir.path())
         .args(["lint", "--format", "json"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["version"], 1);
     assert_eq!(report["files"], 2);
-    assert_eq!(report["diagnostics"][0]["rule"], "parse-error");
-    assert_eq!(report["diagnostics"][0]["path"], "a.gd");
+    assert_eq!(report["diagnostics"].as_array().unwrap().len(), 0);
+    assert_eq!(report["skipped"][0]["path"], "a.gd");
+    assert_eq!(report["skipped"][0]["reason"], "syntax-error");
+    assert_eq!(report["skipped"][0]["line"], 3);
 }
 
 #[test]
@@ -86,7 +92,8 @@ fn a_file_named_directly_is_always_linted() {
         .current_dir(dir.path())
         .args(["lint", "addons/plugin/broken.gd"])
         .assert()
-        .code(1);
+        .code(2)
+        .stderr(predicate::str::contains("1 skipped"));
 }
 
 #[test]
@@ -112,7 +119,7 @@ fn naming_a_file_that_is_not_gdscript_cannot_run() {
 }
 
 #[test]
-fn a_file_that_is_not_utf8_is_reported_and_the_run_continues() {
+fn a_file_that_is_not_utf8_is_skipped_and_the_run_continues() {
     let dir = project(&[("good.gd", VALID)]);
     fs::write(
         dir.path().join("latin1.gd"),
@@ -123,11 +130,13 @@ fn a_file_that_is_not_utf8_is_reported_and_the_run_continues() {
         .current_dir(dir.path())
         .arg("lint")
         .assert()
-        .code(1)
-        .stdout(predicate::str::contains(
-            "latin1.gd:2:6: error[parse-error]: the file is not valid UTF-8",
+        .code(2)
+        .stderr(predicate::str::contains(
+            "latin1.gd:2:6: skipped: the file is not valid UTF-8",
         ))
-        .stderr(predicate::str::contains("1 problem(s) (2 files)"));
+        .stderr(predicate::str::contains(
+            "0 problem(s) (2 files, 1 skipped)",
+        ));
 }
 
 #[test]
@@ -159,9 +168,7 @@ fn rules_publish_a_concern_for_each_rule() {
         .unwrap();
     assert!(output.status.success());
     let rules: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let rules = rules.as_array().unwrap();
-    assert!(!rules.is_empty());
-    for rule in rules {
+    for rule in rules.as_array().unwrap() {
         assert!(rule["id"].is_string());
         assert!(rule["concern"].is_string());
     }

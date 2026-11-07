@@ -1,0 +1,26 @@
+[package]
+name = "gdtidy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Format and lint GDScript, following the official Godot style guide"
+readme = "../../README.md"
+keywords = ["godot", "gdscript", "formatter", "linter", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+gdsyntax.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.12"

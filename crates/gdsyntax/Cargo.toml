@@ -1,0 +1,17 @@
+[package]
+name = "gdsyntax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "GDScript syntax trees and syntax errors, shared by the gdsuite tools"
+readme = "README.md"
+keywords = ["godot", "gdscript", "parser", "tree-sitter"]
+categories = ["parser-implementations", "development-tools"]
+
+[dependencies]
+tree-sitter.workspace = true
+tree-sitter-gdscript.workspace = true

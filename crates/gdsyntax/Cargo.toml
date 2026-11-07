@@ -11,7 +11,10 @@ description = "GDScript syntax trees and syntax errors, shared by the gdsuite to
 readme = "README.md"
 keywords = ["godot", "gdscript", "parser", "tree-sitter"]
 categories = ["parser-implementations", "development-tools"]
+# Godot's test scripts are only needed to run the tests from the repository.
+exclude = ["tests/godot"]
 
 [dependencies]
+rowan.workspace = true
 tree-sitter.workspace = true
 tree-sitter-gdscript.workspace = true

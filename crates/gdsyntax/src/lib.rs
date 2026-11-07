@@ -1,9 +1,37 @@
 //! GDScript syntax trees and syntax errors, shared by the gdsuite tools.
 //!
-//! The trees come from tree-sitter-gdscript and are lossless: comments and
-//! whitespace stay in the source that every node points back into.
+//! [`parse`] still uses tree-sitter-gdscript while the parser translated from
+//! Godot is being written (see `rfcs/0001-gdsyntax-parser.md`). Its first part
+//! is done: [`lexer`], a port of Godot 4.7's tokenizer, and [`lossless_tree`],
+//! which keeps every byte of a file in a tree of tokens.
 
+pub mod kind;
+pub mod lexer;
+
+pub use kind::{GDScript, SyntaxKind};
 pub use tree_sitter::{Node, Tree, TreeCursor};
+
+/// A node of a lossless GDScript tree.
+pub type SyntaxNode = rowan::SyntaxNode<GDScript>;
+/// A token of a lossless GDScript tree.
+pub type SyntaxToken = rowan::SyntaxToken<GDScript>;
+
+/// The source as a lossless tree: one `SOURCE_FILE` node holding every token,
+/// trivia included, with the tokenizer's errors. Until the parser exists the
+/// tree is flat; its text is always exactly `source`.
+pub fn lossless_tree(source: &str) -> (SyntaxNode, Vec<lexer::LexError>) {
+    let lexed = lexer::tokenize(source);
+    let mut builder = rowan::GreenNodeBuilder::new();
+    builder.start_node(SyntaxKind::SOURCE_FILE.into());
+    let mut offset = 0;
+    for token in &lexed.tokens {
+        let end = offset + token.len as usize;
+        builder.token(token.kind.into(), &source[offset..end]);
+        offset = end;
+    }
+    builder.finish_node();
+    (SyntaxNode::new_root(builder.finish()), lexed.errors)
+}
 
 /// A place in the source. Both fields are 1-based; `column` counts characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

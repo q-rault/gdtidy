@@ -4,7 +4,7 @@ Status: proposed, 2026-11-08. Target: replace `gdlint` (gdtoolkit 4.x) in gdsuit
 
 ## Summary
 
-Give `gdtidy lint` the rules that replace gdlint, minus what other tools already own: a configuration file, comments that silence a rule, automatic fixes for the safe cases, and text, JSON and SARIF output. The rules run on the typed tree from gdsyntax 0.1.
+Give `gdtidy lint` the rules that replace gdlint, minus what other tools already own, plus 9 rules from gdck, gdstyle and GDQuest's linter that are relevant, clear and not contested. It also covers a configuration file, comments that silence a rule, automatic fixes for the safe cases, and text, JSON and SARIF output. The rules run on the typed tree from gdsyntax 0.1.
 
 Once this RFC is done, gdsuite can run `gdtidy lint` instead of `gdlint`, and gdlint's Python dependency is down to `gdformat` alone. RFC 0003 (the formatter) removes that one.
 
@@ -18,7 +18,7 @@ Once this RFC is done, gdsuite can run `gdtidy lint` instead of `gdlint`, and gd
 ## Non-goals
 
 - **Rules that need types, the engine, other files or running the code.** By the scope order in the README, those belong to gdtypecheck, gdtest or gdhealth.
-- **New rules beyond gdlint's.** Candidates are listed at the end; each gets its own short RFC once the set below ships.
+- **New rules beyond those listed here.** The rules from other linters that were left out are listed with the reason for each. Further candidates are listed at the end, and each gets its own short RFC once this set ships.
 - **Formatting.** That is RFC 0003.
 - **Godot syncing.** The `godot-sync` script belongs to gdsyntax, which now has its own repository.
 
@@ -81,6 +81,66 @@ Until RFC 0003 ships, gdsuite keeps running `gdformat --check`, which already co
 
 **`class-definitions-order` keeps gdlint's sections by default.** Those are: tools, class_name, extends, doc comment, signals, enums, constants, static variables, exports, public variables, private variables, `@onready` public, `@onready` private, then everything else. They match the official style guide's items 1 to 11. The guide goes on to order methods: `_static_init`, static methods, built-in virtual methods in engine order, other virtual methods, overrides, other methods, inner classes. That part becomes a separate rule, `method-order`, off by default, because turning it on would flag nearly every existing project.
 
+## Rules from gdck, gdstyle and GDQuest's linter
+
+gdck 0.8 (36 rules), gdstyle 0.6 (57 rules) and GDQuest's gdscript-formatter (17 lint rules) were read rule by rule. Everything they share with gdlint is covered above. Each other rule was kept only if it passes three tests:
+- **Relevant:** it catches something real in GDScript 4.
+- **Clear:** the rule is exact, not a guess. "Signals should be in the past tense" needs English word lists, for example.
+- **Not contested:** the official style guide asks for it, and the projects surveyed for gdtidy's style follow it. That survey covered 14 public projects; it found only the continuation indent, dictionary brace spaces and trailing commas contested.
+
+A rule that passes also has to belong to gdtidy lint and not to another tool.
+
+**New rules are on by default only if they find mistakes.** Rules that enforce a style or a limit are off by default. That way switching from gdlint never adds new noise; a project opts in through `gdtidy.toml`.
+
+### Added to gdtidy lint (9)
+
+| Rule | From | Default | Concern | What it reports |
+|---|---|---|---|---|
+| `self-assignment` | gdstyle | on | `self-assignment` | `x = x`. Godot does not warn about it |
+| `loop-variable-assignment` | gdck | on | `loop-variable-assignment` | Assigning to a `for` loop's variable, which never changes the iteration |
+| `doc-tag` | gdck | on | `doc-comment-tags` | A `##` doc tag Godot silently ignores, such as `@tutorial :` with a space before the colon, or an unknown `@tag` |
+| `comment-space` | gdck | off | `comment-spacing` | `#comment` without a space. It is skipped when the text after `#` parses as GDScript (commented-out code, which the guide writes without a space), and for `#region`, `#endregion` and `##`. Fixable |
+| `file-name` | gdck, gdstyle | off | `naming:file` | A `.gd` file name that is not `snake_case`, as the guide asks |
+| `private-call` | GDQuest (`private-access`) | off | `private-call` | Calling `_method()` on something other than `self` or `super` |
+| `max-function-lines` | gdstyle | off (50) | `limit:function-lines` | A function body longer than the limit |
+| `max-branches` | gdstyle | off (8) | `limit:function-branches` | Too many `if`/`elif`/`match` branches in one function |
+| `max-nesting-depth` | gdstyle | off (4) | `limit:nesting-depth` | Blocks nested deeper than the limit |
+
+`comment-space` is off by default because the guide's own exception (code without a space) makes it a judgement call on the margins. `private-call` is off by default because tests often call private methods on purpose.
+
+### Handed to the formatter (RFC 0003)
+
+These change how the code is written, never what it does, and need no judgement, so `gdtidy fmt` applies them and lint never reports them:
+- **Whitespace and lines:** tab indentation, trailing whitespace, one final newline, LF line endings, no byte order mark, at most two blank lines in a row, two blank lines around functions and classes, one statement per line (statements separated with `;` are split).
+- **Spacing:** one space around binary operators, after commas and after `:`; no space before `(` in a call.
+- **Spelling:** `and`/`or`/`not` instead of `&&`/`||`/`!`; double quotes unless single quotes avoid escapes; lowercase hexadecimal digits; floats written with both zeros (`0.5`, `1.0`); no parentheses around a whole `if`/`elif`/`while` condition.
+- **Layout:** enum members one per line.
+
+Three contested choices become formatter options, with the style guide's choice as the default, as the README already says:
+- the continuation indent;
+- spaces inside one-line dictionaries;
+- trailing commas in multi-line collections.
+
+A fourth option is `_` separators in large numbers, off by default, because no threshold is agreed.
+
+### Left out
+
+| Rule (tool) | Why |
+|---|---|
+| `duplicate-dict-key` (gdstyle) | Godot reports it as an error: gdtypecheck |
+| `unreachable-code` (gdstyle) | Godot warning `UNREACHABLE_CODE`: gdtypecheck |
+| `type-hint` (gdstyle) | Godot warning `UNTYPED_DECLARATION`: gdtypecheck |
+| `reserved-identifier`, `lex-error` (gdstyle) | Godot parse errors: the file is skipped, and gdtypecheck reports them |
+| `standalone-expression`, `unused-argument` (GDQuest, gdck) | Godot warnings, as for gdlint above |
+| `signal-past-tense` (gdstyle) | Guesses tense from English word lists: not clear |
+| `ambiguous-inferred-type` (gdck) | Whether `var x := 0` was meant as a float is a guess: not clear |
+| `redundant-type-hint` (gdck) | `var n: Node = Node.new()` is common and deliberate: contested |
+| `private-underscore-prefix` with `@export` (gdstyle) | Exported private variables are used on purpose: contested |
+| `node-name-pascal-case` (gdstyle) | Node names live in scenes; code only sees some of them: unclear and partial |
+| `no-debug-print`, `empty-function` (gdstyle) | Prints and empty virtual stubs are normal: contested |
+| `await-in-loop`, `allocation-in-loop`, `process-get-node` (gdstyle) | Performance guesses that are often intended: contested |
+| `max-class-variables`, `max-inner-classes`, `max-local-variables` (gdstyle) | Limits with no guide backing; gdhealth's metrics cover class size |
+
 ## Configuration
 
 `gdtidy.toml`, found by walking up from the file being linted. The walk stops at the first folder that has a `gdtidy.toml` or a `project.godot`. Without one, every rule above runs with its default.
@@ -131,7 +191,7 @@ var x = 1  # gdtidy: ignore=function-variable-name
 # gdtidy: enable=max-returns
 ```
 
-- **gdlint's spellings:** `# gdlint: ignore=...` and its `disable`/`enable` forms are read too, so existing projects need no edits.
+- **gdlint's spellings:** `# gdlint: ignore=...` and its `disable`/`enable` forms are read too, so existing projects need no edits. So are GDQuest's `# gdlint-ignore rule` and `# gdlint-ignore-next-line rule`.
 - **Comma-separated lists** are accepted, as in gdlint.
 - **Unknown names:** a comment naming a rule gdtidy does not have is reported once, as `unknown-rule-in-comment` (concern `suppression-comments`). The exception is a gdlint rule that moved to another tool; that is silently accepted, so old comments don't become noise.
 - **Comments are found as tokens,** not with a regex over the text, so `# gdtidy:` inside a string never counts.
@@ -180,8 +240,8 @@ Each milestone ends with a commit.
 |---|---|---|
 | M1 | Rule interface and registry, `gdtidy.toml` loading, silencing comments (both spellings), parallel run, SARIF output | Framework tests pass with one sample rule; `gdtidy rules --format json` lists options |
 | M2 | The 14 naming rules | Fixtures pass; parity on names |
-| M3 | `class-definitions-order`, the limits (`max-returns`, `function-arguments-number`, `max-public-methods`, `max-file-lines`, `max-line-length`) | Fixtures pass; parity |
-| M4 | `duplicated-load`, `comparison-with-itself`, `no-elif-return`, `no-else-return`, `unnecessary-pass`, and `--fix` | Fixtures and fix-safety tests pass |
+| M3 | `class-definitions-order`, gdlint's limits (`max-returns`, `function-arguments-number`, `max-public-methods`, `max-file-lines`, `max-line-length`), and the three new ones (`max-function-lines`, `max-branches`, `max-nesting-depth`) | Fixtures pass; parity |
+| M4 | `duplicated-load`, `comparison-with-itself`, `no-elif-return`, `no-else-return`, `unnecessary-pass`, the six other new rules (`self-assignment`, `loop-variable-assignment`, `doc-tag`, `comment-space`, `file-name`, `private-call`), and `--fix` | Fixtures and fix-safety tests pass |
 | M5 | `gdtidy migrate`, the full parity run, README and docs | Every parity difference documented; corpus under 1 s |
 
 **After M5:**
@@ -194,7 +254,6 @@ Not part of this RFC. Each one needs its own scope check first:
 - `method-order` (the style guide's method order, described above);
 - `consider-using-in` (`x == a or x == b`);
 - simplifiable boolean expressions;
-- `@onready` variables that are never assigned a node path;
 - magic numbers.
 
 Godot's own warnings (`UNUSED_VARIABLE`, `UNTYPED_DECLARATION` and the other 48) stay gdtypecheck's, whatever their name suggests.

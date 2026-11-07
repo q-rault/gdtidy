@@ -39,5 +39,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
-      # `cargo package` resolves gdsyntax from crates.io, so it comes back
-      # once gdsyntax is published there.
+      # In its own folder: packaging points the build tracking in target/ at the
+      # packaged sources, and the cache would then keep later builds stale.
+      # The packaged crate uses gdsyntax from crates.io, not the checkout.
+      - run: cargo package --workspace --locked --target-dir "${{ runner.temp }}/package"

@@ -56,7 +56,7 @@ Line breaks you write inside brackets are kept, so a list you split stays split.
 | Crate | What it is |
 | --- | --- |
 | [`gdtidy`](crates/gdtidy) | The command-line tool |
-| [`gdsyntax`](crates/gdsyntax) | A GDScript parser translated from Godot's own, with a lossless tree, shared with the other gdsuite tools |
+| [`gdsyntax`](https://github.com/q-rault/gdsyntax) | A GDScript parser translated from Godot's own, with a lossless tree, shared with the other gdsuite tools. It has its own repository; clone it next to this one to build gdtidy. |
 
 ## License
 

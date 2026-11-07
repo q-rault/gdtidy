@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/gdsyntax",
     "crates/gdtidy",
 ]
 
@@ -22,7 +21,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 walkdir = "2.5"
 
-gdsyntax = { path = "crates/gdsyntax", version = "0.1.0" }
+# Lives in its own repository, checked out next to this one until it is on
+# crates.io. Publishing gdtidy drops the path and uses the version.
+gdsyntax = { path = "../gdsyntax", version = "0.1.0" }
 
 [profile.release]
 lto = "thin"

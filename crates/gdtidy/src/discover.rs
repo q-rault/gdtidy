@@ -5,13 +5,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use walkdir::{DirEntry, WalkDir};
 
-/// The `.gd` files under `targets`. A file named directly is always included.
+/// The `.gd` files under `targets`. A `.gd` file named directly is always
+/// included, and naming any other file is an error.
 /// When walking a folder, hidden folders, `addons`, folders containing a
 /// `.gdignore`, and nested Godot projects are skipped, as Godot's editor does.
 pub fn gdscript_files(targets: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for target in targets {
         if target.is_file() {
+            if !is_gdscript(target) {
+                bail!("{}: not a GDScript (.gd) file", target.display());
+            }
             files.push(target.clone());
         } else if target.is_dir() {
             let walker = WalkDir::new(target)

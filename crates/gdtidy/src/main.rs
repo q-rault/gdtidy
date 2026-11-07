@@ -94,9 +94,9 @@ fn run_lint(args: LintArgs) -> Result<u8> {
     let files = discover::gdscript_files(&args.paths)?;
     let mut diagnostics = Vec::new();
     for file in &files {
-        let source = fs::read_to_string(file)
+        let bytes = fs::read(file)
             .with_context(|| format!("cannot read {}", discover::display_path(file)))?;
-        diagnostics.extend(lint::lint_source(file, source));
+        diagnostics.extend(lint::lint_file(file, bytes));
     }
 
     match args.format {

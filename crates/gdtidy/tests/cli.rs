@@ -101,6 +101,57 @@ fn a_missing_target_cannot_run() {
 }
 
 #[test]
+fn naming_a_file_that_is_not_gdscript_cannot_run() {
+    let dir = project(&[("README.md", "# A game\n")]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "README.md"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("not a GDScript (.gd) file"));
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_reported_and_the_run_continues() {
+    let dir = project(&[("good.gd", VALID)]);
+    fs::write(
+        dir.path().join("latin1.gd"),
+        b"extends Node\n# caf\xe9\n".as_slice(),
+    )
+    .unwrap();
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("lint")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "latin1.gd:2:6: error[parse-error]: the file is not valid UTF-8",
+        ))
+        .stderr(predicate::str::contains("1 problem(s) (2 files)"));
+}
+
+#[test]
+fn byte_order_mark_and_crlf_files_parse() {
+    let dir = project(&[
+        (
+            "bom.gd",
+            "\u{feff}extends Node\n\n\nfunc f() -> void:\n\tpass\n",
+        ),
+        (
+            "crlf.gd",
+            "extends Node\r\n\r\n\r\nfunc f() -> void:\r\n\tpass\r\n",
+        ),
+        ("empty.gd", ""),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("lint")
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("0 problem(s) (3 files)"));
+}
+
+#[test]
 fn rules_publish_a_concern_for_each_rule() {
     let output = gdtidy()
         .args(["rules", "--format", "json"])

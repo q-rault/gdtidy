@@ -1,6 +1,6 @@
 # RFC 0003: The gdtidy formatter
 
-Status: accepted, 2026-11-08. Target: replace `gdformat` (gdtoolkit 4.x) in gdsuite, so gdsuite no longer needs Python.
+Status: M1 to M3 done, 2026-11-08; M4 is on gdsuite's `gdtidy-fmt` branch, waiting for the gdtidy 0.2.0 release. Target: replace `gdformat` (gdtoolkit 4.x) in gdsuite, so gdsuite no longer needs Python.
 
 ## Summary
 

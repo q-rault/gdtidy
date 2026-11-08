@@ -10,6 +10,9 @@ fn gdtidy() -> Command {
 
 fn project(files: &[(&str, &str)]) -> TempDir {
     let dir = TempDir::new().unwrap();
+    // A real project root, so configuration lookup never climbs out of the
+    // temporary folder into whatever the machine has above it.
+    fs::write(dir.path().join("project.godot"), "").unwrap();
     for (path, content) in files {
         let path = dir.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -646,4 +649,74 @@ fn migrate_adds_only_the_missing_section() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("already has every section"));
+}
+
+#[test]
+fn gdsuite_toml_sections_apply_and_a_gdtidy_toml_beside_them_is_ignored() {
+    let script = long_script();
+    let dir = project(&[
+        (
+            "gdsuite.toml",
+            "[project]\nroot = \".\"\n\n[test]\ntimeout = 5\n\n[lint]\ndisable = [\"max-line-length\"]\n",
+        ),
+        ("a.gd", &script),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("lint")
+        .assert()
+        .code(0);
+
+    fs::write(dir.path().join("gdtidy.toml"), "[lint]\n").unwrap();
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("lint")
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("gdtidy.toml is ignored"));
+}
+
+#[test]
+fn migrate_writes_into_gdsuite_toml_when_the_project_has_one() {
+    let suite = "[project]\nroot = \".\"\n\n[test]\ntimeout = 5\n";
+    let dir = project(&[
+        ("gdsuite.toml", suite),
+        ("gdlintrc", "max-line-length: 130\n"),
+        ("gdformatrc", ""),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "wrote gdsuite.toml from gdlintrc and gdformatrc",
+        ));
+    assert!(!dir.path().join("gdtidy.toml").exists());
+    let toml = fs::read_to_string(dir.path().join("gdsuite.toml")).unwrap();
+    assert!(toml.starts_with(suite), "{toml}");
+    assert!(toml.contains("# Converted from gdlintrc and gdformatrc by `gdtidy migrate`."));
+    assert!(
+        toml.contains("[lint.rules.max-line-length]\nmax = 130"),
+        "{toml}"
+    );
+    assert!(toml.contains("[fmt]\n"), "{toml}");
+
+    // Sections already in gdsuite.toml are kept, even with --force.
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("already has every section"));
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["migrate", "--force"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("remove it to convert"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("gdsuite.toml")).unwrap(),
+        toml
+    );
 }

@@ -22,7 +22,7 @@ gdtidy lint player/ hud.gd   # only these files and folders
 gdtidy lint --format json    # for tools and agents
 gdtidy lint --format sarif   # for GitHub code scanning
 gdtidy lint --fix            # repair what is safe to repair, report the rest
-gdtidy migrate               # convert ./gdlintrc and ./gdformatrc into gdtidy.toml
+gdtidy migrate               # convert ./gdlintrc and ./gdformatrc into gdtidy.toml (or gdsuite.toml)
 gdtidy rules                 # every rule gdtidy can report (see docs/rules.md)
 ```
 
@@ -30,7 +30,9 @@ When walking a folder, gdtidy skips hidden folders, `addons`, folders with a `.g
 
 ### Configuration
 
-`gdtidy.toml` sits next to `project.godot` (or in any folder under it). For each script, gdtidy uses the nearest one above it, never one outside the project:
+`gdtidy.toml` sits next to `project.godot` (or in any folder under it). For each script, gdtidy uses the nearest one above it, never one outside the project.
+
+A project that uses [gdsuite](https://github.com/q-rault/gdsuite) can instead keep the same `[lint]` and `[fmt]` sections in `gdsuite.toml`, next to the other tools' settings. In each folder, a `gdsuite.toml` with a `[lint]` or `[fmt]` section comes first. Keep gdtidy's settings in one file: a `gdtidy.toml` beside such a `gdsuite.toml` is ignored, with a warning, and the two are not merged.
 
 ```toml
 [lint]
@@ -52,11 +54,11 @@ An unknown rule, option or key is an error, so a typo never turns a rule off. In
 
 ### Moving from gdtoolkit
 
-`gdtidy migrate` reads `gdlintrc` and `gdformatrc` (with or without a leading dot) and writes a `gdtidy.toml` next to them:
+`gdtidy migrate` reads `gdlintrc` and `gdformatrc` (with or without a leading dot) and writes a `gdtidy.toml` next to them, or adds the sections to the `gdsuite.toml` there when the project has one and no `gdtidy.toml`:
 - its `[lint]` section reports the same problems as gdlint. It keeps the values the project changed, keeps gdlint's tab width for `max-line-length`, and says where each dropped rule went, such as `unused-argument`, which Godot reports. Rule names and silencing comments are the same, so nothing else needs to change.
 - its `[fmt]` section keeps gdformat's excluded folders and its `{"a": 1}` dictionaries. gdformat's `line_length` has no equivalent, because gdtidy does not wrap lines.
 
-The original files are left as they are. If `gdtidy.toml` exists, only the sections it does not have yet are added, so a project converted from gdlint can convert its gdformatrc later.
+The original files are left as they are. If `gdtidy.toml` (or `gdsuite.toml`) exists, only the sections it does not have yet are added, so a project converted from gdlint can convert its gdformatrc later. `--force` replaces a whole `gdtidy.toml`, but never touches a section already in `gdsuite.toml`.
 
 Differences with gdlint, all deliberate, are listed in [docs/gdlint-differences.md](docs/gdlint-differences.md).
 

@@ -2,7 +2,7 @@
 
 Every rule gdtidy can report. `gdtidy rules` lists them with whether they are on by default, and `gdtidy rules --format json` adds each rule's concern and options. [RFC 0002](../rfcs/0002-lint-rules.md) lists the rules still to come, and where gdlint's other rules went.
 
-Options are set in `gdtidy.toml`:
+Options are set in `gdtidy.toml`, or in the same sections of `gdsuite.toml` (see the [README](../README.md#configuration)):
 
 ```toml
 [lint.rules.max-line-length]

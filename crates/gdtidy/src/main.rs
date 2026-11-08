@@ -30,18 +30,20 @@ enum Command {
     Lint(LintArgs),
     /// List every rule gdtidy can report
     Rules(RulesArgs),
-    /// Convert a gdlintrc into a gdtidy.toml next to it
+    /// Convert a gdlintrc and a gdformatrc into a gdtidy.toml next to them
     Migrate(MigrateArgs),
 }
 
 #[derive(Args)]
 struct MigrateArgs {
-    /// The gdlintrc to convert [default: gdlintrc or .gdlintrc here]
-    gdlintrc: Option<PathBuf>,
+    /// The gdlintrc and gdformatrc to convert [default: those in this folder,
+    /// with or without a leading dot]
+    files: Vec<PathBuf>,
     /// Print the configuration instead of writing gdtidy.toml
     #[arg(long)]
     stdout: bool,
-    /// Replace an existing gdtidy.toml
+    /// Replace an existing gdtidy.toml; without it, only the sections it
+    /// does not have yet are added
     #[arg(long)]
     force: bool,
 }
@@ -408,40 +410,102 @@ fn list_rules(args: RulesArgs) -> Result<u8> {
 }
 
 fn run_migrate(args: MigrateArgs) -> Result<u8> {
-    let source = match args.gdlintrc {
-        Some(path) => path,
-        None => ["gdlintrc", ".gdlintrc"]
-            .into_iter()
-            .map(PathBuf::from)
-            .find(|p| p.is_file())
-            .context("no gdlintrc or .gdlintrc in this folder; name the file to convert")?,
+    use std::path::Path;
+    let is_fmt = |path: &Path| path.to_string_lossy().contains("gdformatrc");
+    let find = |names: [&str; 2]| names.into_iter().map(PathBuf::from).find(|p| p.is_file());
+    let (lint_source, fmt_source) = if args.files.is_empty() {
+        (
+            find(["gdlintrc", ".gdlintrc"]),
+            find(["gdformatrc", ".gdformatrc"]),
+        )
+    } else {
+        (
+            args.files.iter().find(|p| !is_fmt(p)).cloned(),
+            args.files.iter().find(|p| is_fmt(p)).cloned(),
+        )
     };
-    let text =
-        fs::read_to_string(&source).with_context(|| format!("cannot read {}", source.display()))?;
-    let migration = migrate::migrate(&text).with_context(|| format!("{}", source.display()))?;
-    for note in &migration.notes {
-        eprintln!("gdtidy: {note}");
-    }
-    if args.stdout {
-        print!("{}", migration.toml);
-        return Ok(OK);
-    }
-    let target = source
+    let Some(first) = lint_source.as_ref().or(fmt_source.as_ref()) else {
+        anyhow::bail!(
+            "no gdlintrc or gdformatrc (with or without a leading dot) in this folder; \
+             name the files to convert"
+        );
+    };
+    let target = first
         .parent()
         .unwrap_or(std::path::Path::new(""))
         .join(config::FILE_NAME);
-    if target.exists() && !args.force {
+
+    // Without --force, an existing gdtidy.toml keeps its sections and gets
+    // the missing ones.
+    let existing = if target.exists() && !args.force && !args.stdout {
+        let text = fs::read_to_string(&target)
+            .with_context(|| format!("cannot read {}", target.display()))?;
+        let table: toml::Table = text
+            .parse()
+            .with_context(|| format!("{} is not valid TOML", target.display()))?;
+        Some((text, table))
+    } else {
+        None
+    };
+    let has = |section: &str| {
+        existing
+            .as_ref()
+            .is_some_and(|(_, table)| table.contains_key(section))
+    };
+
+    let mut sections = Vec::new();
+    let mut converted = Vec::new();
+    for (source, section, convert) in [
+        (
+            &lint_source,
+            "lint",
+            migrate::migrate as fn(&str) -> Result<migrate::Migration>,
+        ),
+        (&fmt_source, "fmt", migrate::migrate_gdformatrc),
+    ] {
+        let Some(source) = source else { continue };
+        if has(section) {
+            eprintln!(
+                "gdtidy: {} already has [{section}]; {} is not converted (use --force to replace it)",
+                target.display(),
+                source.display()
+            );
+            continue;
+        }
+        let text = fs::read_to_string(source)
+            .with_context(|| format!("cannot read {}", source.display()))?;
+        let migration = convert(&text).with_context(|| format!("{}", source.display()))?;
+        for note in &migration.notes {
+            eprintln!("gdtidy: {note}");
+        }
+        sections.push(migration.toml);
+        converted.push(source.display().to_string());
+    }
+    if sections.is_empty() {
         anyhow::bail!(
-            "{} already exists; use --force to replace it, or --stdout to see the result",
+            "{} already has every section to convert; use --force to replace it, \
+             or --stdout to see the result",
             target.display()
         );
     }
-    fs::write(&target, &migration.toml)
-        .with_context(|| format!("cannot write {}", target.display()))?;
+    let toml = match &existing {
+        Some((text, _)) => format!("{}\n{}", text.trim_end(), "\n") + &sections.join("\n"),
+        None => format!(
+            "# Converted from {} by `gdtidy migrate`.\n\n{}",
+            converted.join(" and "),
+            sections.join("\n")
+        ),
+    };
+    config::Config::parse(&toml, None).context("the converted configuration is not valid")?;
+    if args.stdout {
+        print!("{toml}");
+        return Ok(OK);
+    }
+    fs::write(&target, &toml).with_context(|| format!("cannot write {}", target.display()))?;
     eprintln!(
-        "gdtidy: wrote {} from {}; the gdlintrc is left as it is",
+        "gdtidy: wrote {} from {}; the original files are left as they are",
         target.display(),
-        source.display()
+        converted.join(" and ")
     );
     Ok(OK)
 }

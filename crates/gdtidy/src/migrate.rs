@@ -1,5 +1,6 @@
-//! `gdtidy migrate`: convert a gdlintrc into a `gdtidy.toml` that reports
-//! the same problems.
+//! `gdtidy migrate`: convert a gdlintrc into the `[lint]` section of a
+//! `gdtidy.toml` that reports the same problems, and a gdformatrc into its
+//! `[fmt]` section.
 //!
 //! Kept rules carry their values over; values equal to gdtidy's defaults
 //! are left out, so the file only says what the project changed. The one
@@ -51,6 +52,7 @@ const FLAG_RULES: &[&str] = &[
 
 /// What a conversion gives.
 pub struct Migration {
+    /// One section of `gdtidy.toml`, starting with its header.
     pub toml: String,
     /// What the user should know: dropped rules and where they went,
     /// entries gdtidy does not need, and anything not understood.
@@ -166,7 +168,7 @@ pub fn migrate(gdlintrc: &str) -> Result<Migration> {
     disable.sort_by_key(|id| position(id));
     disable.dedup();
 
-    let mut toml = String::from("# Converted from gdlintrc by `gdtidy migrate`.\n\n[lint]\n");
+    let mut toml = String::from("[lint]\n");
     if !disable.is_empty() {
         toml += &format!("disable = {}\n", toml_list(&disable));
     }
@@ -180,6 +182,60 @@ pub fn migrate(gdlintrc: &str) -> Result<Migration> {
         }
     }
     // The result must be a configuration gdtidy accepts.
+    Config::parse(&toml, None).context("the converted configuration is not valid")?;
+    Ok(Migration { toml, notes })
+}
+
+/// Convert a gdformatrc into a `[fmt]` section. gdformat writes one-line
+/// dictionaries as `{"a": 1}`, so the section turns brace spaces off to keep
+/// the project's look.
+pub fn migrate_gdformatrc(gdformatrc: &str) -> Result<Migration> {
+    let docs = YamlLoader::load_from_str(gdformatrc).map_err(|e| anyhow!("not valid YAML: {e}"))?;
+    let root = match docs.into_iter().next() {
+        Some(Yaml::Hash(hash)) => hash,
+        None | Some(Yaml::Null) => Default::default(),
+        Some(_) => bail!("expected `key: value` entries at the top level"),
+    };
+    let mut notes = Vec::new();
+    let mut exclude = Vec::new();
+    for (key, value) in &root {
+        match key.as_str() {
+            Some("excluded_directories") => {
+                for dir in strings(value, "excluded_directories")? {
+                    let dir = dir.trim_end_matches('/').to_string();
+                    if dir.starts_with('.') || dir == "addons" {
+                        notes.push(format!(
+                            "{dir} (excluded): gdtidy always skips hidden folders and addons"
+                        ));
+                    } else {
+                        exclude.push(dir);
+                    }
+                }
+            }
+            Some("line_length") => notes.push(
+                "line_length: gdtidy fmt keeps your line breaks and does not wrap lines; \
+                 max-line-length in [lint] reports long ones"
+                    .to_string(),
+            ),
+            Some("use_spaces") => {
+                if !matches!(value, Yaml::Boolean(false) | Yaml::Null) {
+                    notes.push(
+                        "use_spaces: gdtidy fmt always indents with tabs, as the style guide asks"
+                            .to_string(),
+                    );
+                }
+            }
+            Some("safety_checks") => {}
+            Some(other) => notes.push(format!("{other}: not a gdformat setting, ignored")),
+            None => notes.push(format!("ignored a key that is not text: {key:?}")),
+        }
+    }
+    let mut toml = String::from("[fmt]\n");
+    if !exclude.is_empty() {
+        toml += &format!("exclude = {}\n", toml_list(&exclude));
+    }
+    toml += "# gdformat writes one-line dictionaries without spaces: {\"a\": 1}.\n";
+    toml += "dict-brace-spaces = false\n";
     Config::parse(&toml, None).context("the converted configuration is not valid")?;
     Ok(Migration { toml, notes })
 }
@@ -252,7 +308,7 @@ mod tests {
         let migration = migrate(dumped).unwrap();
         assert_eq!(
             migration.toml,
-            "# Converted from gdlintrc by `gdtidy migrate`.\n\n[lint]\n\n[lint.rules.max-line-length]\ntab-width = 1\n"
+            "[lint]\n\n[lint.rules.max-line-length]\ntab-width = 1\n"
         );
         assert!(
             migration
@@ -268,7 +324,7 @@ mod tests {
         let migration = migrate(gdlintrc).unwrap();
         assert_eq!(
             migration.toml,
-            "# Converted from gdlintrc by `gdtidy migrate`.\n\n[lint]\ndisable = ['no-else-return']\nexclude = ['reports']\n\n[lint.rules.function-name]\npattern = '[a-z]+'\n\n[lint.rules.class-definitions-order]\nsections = ['tools', 'others']\n\n[lint.rules.max-returns]\nmax = 3\n\n[lint.rules.max-line-length]\nmax = 130\ntab-width = 4\n"
+            "[lint]\ndisable = ['no-else-return']\nexclude = ['reports']\n\n[lint.rules.function-name]\npattern = '[a-z]+'\n\n[lint.rules.class-definitions-order]\nsections = ['tools', 'others']\n\n[lint.rules.max-returns]\nmax = 3\n\n[lint.rules.max-line-length]\nmax = 130\ntab-width = 4\n"
         );
         assert_eq!(migration.notes.len(), 3, "{:?}", migration.notes);
     }
@@ -278,6 +334,19 @@ mod tests {
         let migration = migrate("disable: [max-line-length]\n").unwrap();
         assert!(!migration.toml.contains("tab-width"));
         assert!(migration.toml.contains("disable = ['max-line-length']"));
+    }
+
+    #[test]
+    fn a_gdformatrc_becomes_the_fmt_section() {
+        let gdformatrc = "excluded_directories: !!set\n  .git: null\n  addons: null\n  generated: null\nline_length: 100\nsafety_checks: true\nuse_spaces: false\n";
+        let migration = migrate_gdformatrc(gdformatrc).unwrap();
+        assert_eq!(
+            migration.toml,
+            "[fmt]\nexclude = ['generated']\n# gdformat writes one-line dictionaries without spaces: {\"a\": 1}.\ndict-brace-spaces = false\n"
+        );
+        assert_eq!(migration.notes.len(), 3, "{:?}", migration.notes);
+        assert!(migration.notes[2].starts_with("line_length:"));
+        assert!(migrate_gdformatrc("use_spaces: 4\n").unwrap().notes[0].contains("tabs"));
     }
 
     #[test]

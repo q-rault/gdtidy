@@ -585,3 +585,54 @@ fn lint_without_fix_changes_nothing() {
         .code(1);
     assert_eq!(fs::read_to_string(dir.path().join("a.gd")).unwrap(), source);
 }
+
+// ---- migrate ----
+
+#[test]
+fn migrate_converts_gdlintrc_and_gdformatrc_together() {
+    let dir = project(&[
+        ("gdlintrc", "max-line-length: 130\n"),
+        (".gdformatrc", "line_length: 130\n"),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("line_length:"))
+        .stderr(predicate::str::contains(
+            "wrote gdtidy.toml from gdlintrc and .gdformatrc",
+        ));
+    let toml = fs::read_to_string(dir.path().join("gdtidy.toml")).unwrap();
+    assert!(toml.starts_with("# Converted from gdlintrc and .gdformatrc"));
+    assert!(toml.contains("[lint.rules.max-line-length]\nmax = 130"));
+    assert!(toml.contains("[fmt]\n"));
+    assert!(toml.contains("dict-brace-spaces = false"));
+}
+
+#[test]
+fn migrate_adds_only_the_missing_section() {
+    let lint_only = "[lint]\ndisable = [\"max-returns\"]\n";
+    let dir = project(&[
+        ("gdtidy.toml", lint_only),
+        ("gdlintrc", "max-line-length: 130\n"),
+        ("gdformatrc", ""),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("already has [lint]"));
+    let toml = fs::read_to_string(dir.path().join("gdtidy.toml")).unwrap();
+    assert!(toml.starts_with(lint_only));
+    assert!(toml.contains("[fmt]\n"));
+    assert!(!toml.contains("max = 130"));
+    // Nothing left to add.
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("already has every section"));
+}

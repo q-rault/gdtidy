@@ -11,7 +11,7 @@ On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not 
 | `unused-argument` | Godot's `UNUSED_PARAMETER` warning (gdtypecheck) |
 | `expression-not-assigned` | Godot's `STANDALONE_EXPRESSION` warning (gdtypecheck) |
 | `mixed-tabs-and-spaces` | A Godot parse error (gdtypecheck) |
-| `trailing-whitespace` | `gdtidy fmt`; until it ships, gdsuite keeps running `gdformat --check` |
+| `trailing-whitespace` | `gdtidy fmt` removes it |
 | `tab-characters` | The `tab-width` option of `max-line-length` |
 
 ## Deliberate differences

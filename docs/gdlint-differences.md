@@ -25,6 +25,7 @@ On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not 
 | `unnecessary-pass` | Not reported in a class whose other members are all functions or inner classes, nor in a block whose other statements are all typed `for` loops | Reported | `pass` is unneeded in both |
 | `no-else-return`, `no-elif-return` | A `match` with a guarded wildcard branch (`_ when x:`) counts as always returning | Does not count | A guarded branch does not catch everything |
 | Every rule | Fails on some valid Godot 4 code (such as `(` in some expressions) and reports nothing for the file | Lints it | gdsyntax is translated from Godot's own parser |
+| Every rule | Lints a nested Godot project (a folder with its own `project.godot`) as part of the outer one | Skips it when walking folders, as the Godot editor does; name the folder to lint it | It is another project, with its own `gdtidy.toml` |
 | Every rule | Reports a file with a syntax error as a problem | Skips it, lists it under `skipped`, and exits with 2 | Syntax errors are Godot's to report: gdtypecheck |
 
 ## Configuration

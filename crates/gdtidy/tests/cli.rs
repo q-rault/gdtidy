@@ -605,6 +605,17 @@ fn migrate_converts_gdlintrc_and_gdformatrc_together() {
         ));
     let toml = fs::read_to_string(dir.path().join("gdtidy.toml")).unwrap();
     assert!(toml.starts_with("# Converted from gdlintrc and .gdformatrc"));
+
+    // Named with a path, the header still gives only the file names.
+    fs::remove_file(dir.path().join("gdtidy.toml")).unwrap();
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("migrate")
+        .arg(dir.path().join("gdlintrc"))
+        .assert()
+        .success();
+    let named = fs::read_to_string(dir.path().join("gdtidy.toml")).unwrap();
+    assert!(named.starts_with("# Converted from gdlintrc by"), "{named}");
     assert!(toml.contains("[lint.rules.max-line-length]\nmax = 130"));
     assert!(toml.contains("[fmt]\n"));
     assert!(toml.contains("dict-brace-spaces = false"));

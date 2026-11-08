@@ -479,7 +479,12 @@ fn run_migrate(args: MigrateArgs) -> Result<u8> {
             eprintln!("gdtidy: {note}");
         }
         sections.push(migration.toml);
-        converted.push(source.display().to_string());
+        // Only the name: the header goes in a committed file, so it must not
+        // carry where the project sits on this machine.
+        converted.push(source.file_name().map_or_else(
+            || source.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        ));
     }
     if sections.is_empty() {
         anyhow::bail!(

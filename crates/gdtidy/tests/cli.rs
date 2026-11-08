@@ -401,8 +401,8 @@ fn output_order_does_not_depend_on_threads() {
 /// SARIF results link to docs/rules.md, so every rule needs a section there.
 #[test]
 fn every_rule_is_documented() {
-    let docs = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/rules.md"))
-        .unwrap();
+    let docs =
+        fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/rules.md")).unwrap();
     let output = gdtidy()
         .args(["rules", "--format", "json"])
         .output()

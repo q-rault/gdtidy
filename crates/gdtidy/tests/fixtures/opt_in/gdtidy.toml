@@ -1,0 +1,3 @@
+# Rules that are off by default.
+[lint]
+enable = ["comment-space", "file-name", "private-call"]

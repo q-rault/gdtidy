@@ -3,9 +3,17 @@
 //! rule's concern and options) so gdsuite can check that no two tools claim
 //! the same concern.
 
+mod checks;
+mod comments;
 mod limits;
+mod naming;
+mod order;
+mod returns;
 
 use std::ops::Range;
+
+use gdsyntax::SyntaxKind::ANNOTATION_NODE;
+use gdsyntax::{SyntaxNode, SyntaxToken};
 
 use serde::Serialize;
 
@@ -29,6 +37,8 @@ impl Severity {
 pub struct Context<'a> {
     pub tree: &'a gdsyntax::SyntaxTree,
     pub options: &'a RuleOptions,
+    /// The file's name, such as `player.gd`.
+    pub file_name: &'a str,
 }
 
 /// A problem a rule found, as a byte range of the source.
@@ -36,6 +46,32 @@ pub struct Context<'a> {
 pub struct Finding {
     pub range: Range<usize>,
     pub message: String,
+    /// How to repair it, for `--fix`. Only rules marked `fixable` give one,
+    /// and only when the repair is safe in that spot.
+    pub fix: Option<Fix>,
+}
+
+impl Finding {
+    pub fn new(range: Range<usize>, message: impl Into<String>) -> Self {
+        Finding {
+            range,
+            message: message.into(),
+            fix: None,
+        }
+    }
+}
+
+/// Replacements in the source that repair one finding. A fix may remove
+/// code tokens and change trivia; `--fix` checks that it does nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fix {
+    pub edits: Vec<Edit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    pub range: Range<usize>,
+    pub text: String,
 }
 
 pub type Check = fn(&Context, &mut Vec<Finding>);
@@ -43,11 +79,12 @@ pub type Check = fn(&Context, &mut Vec<Finding>);
 /// The type and default of one rule option.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(tag = "type", content = "default", rename_all = "lowercase")]
-// The naming rules (M2) and member order (M3) use the string kinds.
-#[allow(dead_code)]
+#[allow(dead_code)] // No rule has a plain string option yet.
 pub enum OptionKind {
     Integer(i64),
     String(&'static str),
+    /// A regular expression that must match the whole text, as in gdlint.
+    Pattern(&'static str),
     #[serde(rename = "string-list")]
     StringList(&'static [&'static str]),
 }
@@ -94,7 +131,43 @@ pub const UNKNOWN_RULE_IN_COMMENT: Rule = Rule {
     check: None,
 };
 
-pub const RULES: &[Rule] = &[limits::MAX_LINE_LENGTH, UNKNOWN_RULE_IN_COMMENT];
+pub const RULES: &[Rule] = &[
+    naming::FUNCTION_NAME,
+    naming::CLASS_NAME,
+    naming::SUB_CLASS_NAME,
+    naming::SIGNAL_NAME,
+    naming::CLASS_VARIABLE_NAME,
+    naming::CLASS_LOAD_VARIABLE_NAME,
+    naming::FUNCTION_VARIABLE_NAME,
+    naming::FUNCTION_PRELOAD_VARIABLE_NAME,
+    naming::FUNCTION_ARGUMENT_NAME,
+    naming::LOOP_VARIABLE_NAME,
+    naming::ENUM_NAME,
+    naming::ENUM_ELEMENT_NAME,
+    naming::CONSTANT_NAME,
+    naming::LOAD_CONSTANT_NAME,
+    naming::FILE_NAME,
+    order::CLASS_DEFINITIONS_ORDER,
+    limits::MAX_RETURNS,
+    limits::FUNCTION_ARGUMENTS_NUMBER,
+    limits::MAX_PUBLIC_METHODS,
+    limits::MAX_FILE_LINES,
+    limits::MAX_LINE_LENGTH,
+    limits::MAX_FUNCTION_LINES,
+    limits::MAX_BRANCHES,
+    limits::MAX_NESTING_DEPTH,
+    checks::DUPLICATED_LOAD,
+    checks::COMPARISON_WITH_ITSELF,
+    returns::NO_ELIF_RETURN,
+    returns::NO_ELSE_RETURN,
+    checks::UNNECESSARY_PASS,
+    checks::SELF_ASSIGNMENT,
+    checks::LOOP_VARIABLE_ASSIGNMENT,
+    comments::DOC_TAG,
+    comments::COMMENT_SPACE,
+    checks::PRIVATE_CALL,
+    UNKNOWN_RULE_IN_COMMENT,
+];
 
 pub fn find(id: &str) -> Option<&'static Rule> {
     RULES.iter().find(|r| r.id == id)
@@ -141,44 +214,7 @@ pub fn moved(id: &str) -> Option<&'static str> {
 /// Rules RFC 0002 adds in later milestones. Until each lands, silencing
 /// comments that name it are accepted, and `gdtidy.toml` says it is not
 /// implemented yet. Each milestone removes the rules it implements.
-pub const PLANNED: &[&str] = &[
-    // M2: naming
-    "function-name",
-    "class-name",
-    "sub-class-name",
-    "signal-name",
-    "class-variable-name",
-    "class-load-variable-name",
-    "function-variable-name",
-    "function-preload-variable-name",
-    "function-argument-name",
-    "loop-variable-name",
-    "enum-name",
-    "enum-element-name",
-    "constant-name",
-    "load-constant-name",
-    // M3: order and limits
-    "class-definitions-order",
-    "max-returns",
-    "function-arguments-number",
-    "max-public-methods",
-    "max-file-lines",
-    "max-function-lines",
-    "max-branches",
-    "max-nesting-depth",
-    // M4: the rest
-    "duplicated-load",
-    "comparison-with-itself",
-    "no-elif-return",
-    "no-else-return",
-    "unnecessary-pass",
-    "self-assignment",
-    "loop-variable-assignment",
-    "doc-tag",
-    "comment-space",
-    "file-name",
-    "private-call",
-];
+pub const PLANNED: &[&str] = &[];
 
 /// Names GDQuest's linter uses for gdtidy rules. A silencing comment that
 /// names one silences the gdtidy rules it stands for.
@@ -206,4 +242,29 @@ pub fn known_in_comment(name: &str) -> bool {
         || moved(name).is_some()
         || PLANNED.contains(&name)
         || !resolve_alias(name).is_empty()
+}
+
+/// The byte range of a token.
+pub fn token_range(token: &SyntaxToken) -> Range<usize> {
+    usize::from(token.text_range().start())..usize::from(token.text_range().end())
+}
+
+/// Where a declaration or statement is reported: its first token after its
+/// annotations, such as `var` in `@export var x`. Annotations can be on the
+/// lines above, and the problem is with what follows them.
+pub fn start_after_annotations(node: &SyntaxNode) -> Range<usize> {
+    let first =
+        node.children_with_tokens()
+            .filter(|e| e.kind() != ANNOTATION_NODE)
+            .find_map(|e| match e {
+                gdsyntax::rowan::NodeOrToken::Token(t) => {
+                    gdsyntax::ast::is_code(&t).then(|| token_range(&t))
+                }
+                gdsyntax::rowan::NodeOrToken::Node(n) => gdsyntax::ast::code_range(&n)
+                    .map(|r| usize::from(r.start())..usize::from(r.end())),
+            });
+    first.unwrap_or_else(|| {
+        let range = node.text_range();
+        usize::from(range.start())..usize::from(range.end())
+    })
 }

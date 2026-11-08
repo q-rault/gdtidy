@@ -1,0 +1,2 @@
+[lint.rules.max-file-lines]
+max = 3

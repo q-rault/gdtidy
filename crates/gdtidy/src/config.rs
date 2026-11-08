@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use regex::Regex;
 use toml::{Table, Value};
 
 use crate::rules::{self, OptionKind, Rule};
@@ -34,6 +35,36 @@ pub enum OptionValue {
     Integer(i64),
     String(String),
     StringList(Vec<String>),
+    Pattern(Pattern),
+}
+
+/// A regular expression that must match the whole text, compiled once when
+/// the configuration is read.
+#[derive(Debug, Clone)]
+pub struct Pattern {
+    pub source: String,
+    regex: Arc<Regex>,
+}
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+    }
+}
+
+impl Pattern {
+    pub fn new(source: &str) -> Result<Self> {
+        // gdlint uses Python's `re.fullmatch`; anchoring a group does the same.
+        let regex = Regex::new(&format!("^(?:{source})$")).map_err(|e| anyhow!("{e}"))?;
+        Ok(Pattern {
+            source: source.to_string(),
+            regex: Arc::new(regex),
+        })
+    }
+
+    pub fn is_match(&self, text: &str) -> bool {
+        self.regex.is_match(text)
+    }
 }
 
 /// The options of one rule: its defaults, overridden by the configuration.
@@ -51,6 +82,9 @@ impl RuleOptions {
                 let value = match option.kind {
                     OptionKind::Integer(n) => OptionValue::Integer(n),
                     OptionKind::String(s) => OptionValue::String(s.to_string()),
+                    OptionKind::Pattern(p) => OptionValue::Pattern(
+                        Pattern::new(p).expect("default patterns are valid regular expressions"),
+                    ),
                     OptionKind::StringList(list) => {
                         OptionValue::StringList(list.iter().map(|s| s.to_string()).collect())
                     }
@@ -70,7 +104,14 @@ impl RuleOptions {
         }
     }
 
-    #[allow(dead_code)] // Used by the naming rules (M2).
+    pub fn pattern(&self, name: &str) -> &Pattern {
+        match self.values.get(name) {
+            Some(OptionValue::Pattern(p)) => p,
+            other => panic!("option {name} is not a pattern: {other:?}"),
+        }
+    }
+
+    #[allow(dead_code)] // No rule has a plain string option yet.
     pub fn string(&self, name: &str) -> &str {
         match self.values.get(name) {
             Some(OptionValue::String(s)) => s,
@@ -115,7 +156,9 @@ impl Config {
         self.rules.iter().any(|(rule, _)| rule.id == id)
     }
 
-    /// Whether `path` is under one of the `exclude` folders.
+    /// Whether `path` is under one of the `exclude` folders. As in
+    /// `.gitignore`, a name alone (`reports`) matches a folder at any depth,
+    /// and a path (`tools/gen`, `/reports`) is relative to the root.
     pub fn excludes(&self, path: &Path) -> bool {
         let Some(root) = &self.root else {
             return false;
@@ -124,9 +167,17 @@ impl Config {
             return false;
         };
         let relative = relative.to_string_lossy().replace('\\', "/");
+        let parts: Vec<&str> = relative.split('/').collect();
+        let folders = &parts[..parts.len().saturating_sub(1)];
         self.exclude.iter().any(|entry| {
             let entry = entry.trim_end_matches('/');
-            relative == entry || relative.starts_with(&format!("{entry}/"))
+            match entry.strip_prefix('/') {
+                None if !entry.contains('/') => folders.contains(&entry),
+                rooted => {
+                    let entry = rooted.unwrap_or(entry);
+                    relative == entry || relative.starts_with(&format!("{entry}/"))
+                }
+            }
         })
     }
 
@@ -191,6 +242,16 @@ impl Config {
                                         })?
                                         .to_string(),
                                 ),
+                                OptionKind::Pattern(_) => {
+                                    let text = value.as_str().ok_or_else(|| {
+                                        anyhow!("`{where_}.{name}` must be a string")
+                                    })?;
+                                    OptionValue::Pattern(Pattern::new(text).map_err(|e| {
+                                        anyhow!(
+                                            "`{where_}.{name}` is not a valid regular expression: {e}"
+                                        )
+                                    })?)
+                                }
                                 OptionKind::StringList(_) => OptionValue::StringList(string_list(
                                     value,
                                     &format!("{where_}.{name}"),
@@ -303,7 +364,11 @@ mod tests {
     #[test]
     fn options_override_defaults() {
         let config = parse("[lint.rules.max-line-length]\nmax = 130\n").unwrap();
-        let (_, options) = &config.rules[0];
+        let (_, options) = config
+            .rules
+            .iter()
+            .find(|(rule, _)| rule.id == "max-line-length")
+            .unwrap();
         assert_eq!(options.integer("max"), 130);
         assert_eq!(options.integer("tab-width"), 4);
     }
@@ -323,17 +388,35 @@ mod tests {
         assert!(
             error("[lint.rules.max-line-length]\nmax = \"1\"\n").contains("must be an integer")
         );
+        assert!(
+            error("[lint.rules.class-name]\npattern = \"(\"\n").contains("not a valid regular")
+        );
         assert!(error("[lnit]\n").contains("unknown section"));
         assert!(error("[lint]\nignore = []\n").contains("unknown key"));
     }
 
     #[test]
-    fn exclude_matches_folders_under_the_root() {
-        let mut config = parse("[lint]\nexclude = [\"reports\", \"tools/gen/\"]\n").unwrap();
+    fn patterns_match_the_whole_name() {
+        let pattern = Pattern::new("[a-z]+|[A-Z]+").unwrap();
+        assert!(pattern.is_match("abc"));
+        assert!(pattern.is_match("ABC"));
+        assert!(!pattern.is_match("abcDEF"));
+    }
+
+    #[test]
+    fn exclude_matches_like_gitignore() {
+        let mut config =
+            parse("[lint]\nexclude = [\"reports\", \"tools/gen/\", \"/build\"]\n").unwrap();
         config.root = Some(PathBuf::from("/p"));
+        // A name alone: a folder at any depth, as gdlint's excluded_directories.
         assert!(config.excludes(Path::new("/p/reports/a.gd")));
-        assert!(config.excludes(Path::new("/p/tools/gen/b/c.gd")));
+        assert!(config.excludes(Path::new("/p/src/reports/a.gd")));
         assert!(!config.excludes(Path::new("/p/reports2/a.gd")));
-        assert!(!config.excludes(Path::new("/p/src/reports/a.gd")));
+        assert!(!config.excludes(Path::new("/p/reports.gd")));
+        // A path: relative to the root.
+        assert!(config.excludes(Path::new("/p/tools/gen/b/c.gd")));
+        assert!(!config.excludes(Path::new("/p/src/tools/gen/c.gd")));
+        assert!(config.excludes(Path::new("/p/build/a.gd")));
+        assert!(!config.excludes(Path::new("/p/src/build/a.gd")));
     }
 }

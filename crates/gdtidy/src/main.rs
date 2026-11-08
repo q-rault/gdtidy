@@ -1,6 +1,7 @@
 mod config;
 mod discover;
 mod lint;
+mod migrate;
 mod rules;
 mod sarif;
 mod suppress;
@@ -28,6 +29,20 @@ enum Command {
     Lint(LintArgs),
     /// List every rule gdtidy can report
     Rules(RulesArgs),
+    /// Convert a gdlintrc into a gdtidy.toml next to it
+    Migrate(MigrateArgs),
+}
+
+#[derive(Args)]
+struct MigrateArgs {
+    /// The gdlintrc to convert [default: gdlintrc or .gdlintrc here]
+    gdlintrc: Option<PathBuf>,
+    /// Print the configuration instead of writing gdtidy.toml
+    #[arg(long)]
+    stdout: bool,
+    /// Replace an existing gdtidy.toml
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Args)]
@@ -47,6 +62,9 @@ struct LintArgs {
     paths: Vec<PathBuf>,
     #[arg(long, value_enum, default_value_t = LintFormat::Text)]
     format: LintFormat,
+    /// Repair the problems that can be repaired safely, then report the rest
+    #[arg(long)]
+    fix: bool,
 }
 
 #[derive(Args)]
@@ -80,6 +98,7 @@ fn main() -> ExitCode {
         Command::Fmt(args) => fmt(args),
         Command::Lint(args) => run_lint(args),
         Command::Rules(args) => list_rules(args),
+        Command::Migrate(args) => run_migrate(args),
     };
     match result {
         Ok(code) => ExitCode::from(code),
@@ -99,6 +118,8 @@ fn fmt(args: FmtArgs) -> Result<u8> {
 struct LintReport {
     version: u32,
     files: usize,
+    /// Problems `--fix` repaired; they are not in `diagnostics`.
+    fixed: usize,
     diagnostics: Vec<lint::Diagnostic>,
     /// Files that could not be checked, such as files with a syntax error.
     skipped: Vec<lint::Skipped>,
@@ -129,22 +150,31 @@ fn run_lint(args: LintArgs) -> Result<u8> {
         }
         jobs.push((target.path, config));
     }
-    let outcomes: Vec<lint::Outcome> = jobs
+    let outcomes: Vec<(lint::Outcome, usize)> = jobs
         .par_iter()
         .map(|(path, config)| {
             let shown = discover::display_path(path);
-            let bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
-            Ok(lint::lint_file(shown, &bytes, config))
+            let mut bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
+            let mut fixed = 0;
+            if args.fix
+                && let Some((text, count)) = lint::fix_file(shown.clone(), &bytes, config)
+            {
+                fs::write(path, &text).with_context(|| format!("cannot write {shown}"))?;
+                bytes = text.into_bytes();
+                fixed = count;
+            }
+            Ok((lint::lint_file(shown, &bytes, config), fixed))
         })
         .collect::<Result<_>>()?;
 
     let mut report = LintReport {
         version: 1,
         files: jobs.len(),
+        fixed: outcomes.iter().map(|(_, fixed)| fixed).sum(),
         diagnostics: Vec::new(),
         skipped: Vec::new(),
     };
-    for outcome in outcomes {
+    for (outcome, _) in outcomes {
         match outcome {
             lint::Outcome::Checked(diagnostics) => report.diagnostics.extend(diagnostics),
             lint::Outcome::Skipped(skipped) => report.skipped.push(skipped),
@@ -180,6 +210,9 @@ fn run_lint(args: LintArgs) -> Result<u8> {
             if !report.skipped.is_empty() {
                 summary += &format!(", {} skipped", report.skipped.len());
             }
+            if report.fixed > 0 {
+                summary += &format!(", {} fixed", report.fixed);
+            }
             eprintln!("{summary})");
         }
     }
@@ -196,5 +229,44 @@ fn list_rules(args: RulesArgs) -> Result<u8> {
             }
         }
     }
+    Ok(OK)
+}
+
+fn run_migrate(args: MigrateArgs) -> Result<u8> {
+    let source = match args.gdlintrc {
+        Some(path) => path,
+        None => ["gdlintrc", ".gdlintrc"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|p| p.is_file())
+            .context("no gdlintrc or .gdlintrc in this folder; name the file to convert")?,
+    };
+    let text =
+        fs::read_to_string(&source).with_context(|| format!("cannot read {}", source.display()))?;
+    let migration = migrate::migrate(&text).with_context(|| format!("{}", source.display()))?;
+    for note in &migration.notes {
+        eprintln!("gdtidy: {note}");
+    }
+    if args.stdout {
+        print!("{}", migration.toml);
+        return Ok(OK);
+    }
+    let target = source
+        .parent()
+        .unwrap_or(std::path::Path::new(""))
+        .join(config::FILE_NAME);
+    if target.exists() && !args.force {
+        anyhow::bail!(
+            "{} already exists; use --force to replace it, or --stdout to see the result",
+            target.display()
+        );
+    }
+    fs::write(&target, &migration.toml)
+        .with_context(|| format!("cannot write {}", target.display()))?;
+    eprintln!(
+        "gdtidy: wrote {} from {}; the gdlintrc is left as it is",
+        target.display(),
+        source.display()
+    );
     Ok(OK)
 }

@@ -1,0 +1,39 @@
+# Differences with gdlint
+
+gdtidy keeps 24 of gdlint 4.5's rules with the same names, defaults and findings, and `max-line-length` with a different tab width. This page lists every place where the two report something different, and why. The comparison test (`GDTIDY_PARITY=1`, see `crates/gdtidy/tests/parity.rs`) checks it: it fails if gdlint reports something gdtidy does not, and lists what only gdtidy reports.
+
+On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not parse 21 files, which gdtidy lints as usual. On the other 1,098 files, gdtidy reports all 835 of gdlint's findings, plus 8 from the static-function difference below.
+
+## Rules that moved
+
+| gdlint rule | Where it went |
+|---|---|
+| `unused-argument` | Godot's `UNUSED_PARAMETER` warning (gdtypecheck) |
+| `expression-not-assigned` | Godot's `STANDALONE_EXPRESSION` warning (gdtypecheck) |
+| `mixed-tabs-and-spaces` | A Godot parse error (gdtypecheck) |
+| `trailing-whitespace` | `gdtidy fmt`; until it ships, gdsuite keeps running `gdformat --check` |
+| `tab-characters` | The `tab-width` option of `max-line-length` |
+
+## Deliberate differences
+
+| Rule | gdlint | gdtidy | Why |
+|---|---|---|---|
+| `max-line-length` | Counts a tab as 1 column (`tab-characters: 1`) | Counts a tab as 4 columns (`tab-width = 4`) | Godot's editor shows a tab as 4 columns. `gdtidy migrate` writes gdlint's value, so a converted project gets the same results |
+| `max-returns`, `function-arguments-number`, `max-public-methods` | Leaves static functions out | Counts them | A static function is a function; nothing in gdlint's documentation says they are exempt |
+| `class-name` | Skips `class_name Name extends Base` on one line | Checks it | The same name, written on one line |
+| `duplicated-load` | Compares the quoted text, so `load("a.gd")` and `load('a.gd')` differ | Compares the path | Both load the same file |
+| `unnecessary-pass` | Not reported in a class whose other members are all functions or inner classes, nor in a block whose other statements are all typed `for` loops | Reported | `pass` is unneeded in both |
+| `no-else-return`, `no-elif-return` | A `match` with a guarded wildcard branch (`_ when x:`) counts as always returning | Does not count | A guarded branch does not catch everything |
+| Every rule | Fails on some valid Godot 4 code (such as `(` in some expressions) and reports nothing for the file | Lints it | gdsyntax is translated from Godot's own parser |
+| Every rule | Reports a file with a syntax error as a problem | Skips it, lists it under `skipped`, and exits with 2 | Syntax errors are Godot's to report: gdtypecheck |
+
+## Configuration
+
+| gdlintrc | gdtidy.toml |
+|---|---|
+| `rule-name: value` | `[lint.rules.rule-name]` with `pattern`, `max` or `sections` |
+| `disable: [...]` | `[lint] disable = [...]` |
+| `excluded_directories` | `[lint] exclude`, where a name alone matches a folder at any depth, as in gdlint. Hidden folders and `addons` are always skipped |
+| Found by walking up from the current folder | Found by walking up from each script, stopping at `project.godot` |
+
+`gdtidy migrate` does this conversion.

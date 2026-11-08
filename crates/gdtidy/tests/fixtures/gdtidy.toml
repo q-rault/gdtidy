@@ -1,0 +1,3 @@
+# Fixtures run every rule, so each file shows exactly what gdtidy reports.
+# A line that must be reported ends with `# expect: rule-a, rule-b`.
+[lint]

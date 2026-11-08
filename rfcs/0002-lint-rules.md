@@ -1,6 +1,6 @@
 # RFC 0002: Lint rules for gdtidy
 
-Status: in progress, 2026-11-08. M1 done. Target: replace `gdlint` (gdtoolkit 4.x) in gdsuite.
+Status: done, 2026-11-08 (M1 to M5). Target: replace `gdlint` (gdtoolkit 4.x) in gdsuite.
 
 ## Summary
 
@@ -229,7 +229,7 @@ All rules report `warning`. As now, the exit code is 1 when there are problems a
    - the 14 public projects used for gdsyntax;
    - any private projects named in `GDSYNTAX_CORPUS`.
 
-   Every difference has to be listed in `tests/parity-differences.md` with its reason, such as a gdlint bug, Godot 4 syntax gdlint mis-parses, or the `tab-width` default.
+   Every difference has to be listed in `docs/gdlint-differences.md` with its reason, such as a gdlint bug, Godot 4 syntax gdlint mis-parses, or the `tab-width` default.
 3. **Migration:** gdlintrc files with every option convert to configurations that give the same results.
 4. **Fixes:** applying `--fix` to the corpus never adds an error, never changes the tree beyond the fix, and is idempotent.
 5. **Speed:** the corpus is linted in under 1 second on 8 threads, in the benchmark example.
@@ -259,3 +259,12 @@ Not part of this RFC. Each one needs its own scope check first:
 - magic numbers.
 
 Godot's own warnings (`UNUSED_VARIABLE`, `UNTYPED_DECLARATION` and the other 48) stay gdtypecheck's, whatever their name suggests.
+
+## Outcome
+
+- **Parity.** On the 14 public projects, gdlint 4.5 parses 1,098 of 1,119 files. On those, gdtidy reports all 835 of gdlint's findings and 8 more, all in static functions, which gdlint leaves out of its function limits. [docs/gdlint-differences.md](../docs/gdlint-differences.md) lists every difference. On a private project, its gdlintrc converted by `gdtidy migrate` gives gdlint's 39 findings, plus one more in a static function.
+- **Speed.** The 14 projects (429,000 lines) are linted in 0.37 s on 8 threads, in a release build.
+- **Fixes.** `--fix` on a copy of the 14 projects (with `comment-space` on) applied 67 fixes, broke no file, and found nothing to fix on a second run.
+- **Changes from the plan:**
+  - `exclude` in `gdtidy.toml` matches like `.gitignore`: a name alone is a folder at any depth, as gdlint's `excluded_directories`, and a path is relative to the file.
+  - The comparison lives in `crates/gdtidy/tests/parity.rs`. It fails only when gdlint reports something gdtidy does not; what only gdtidy reports is printed for review.

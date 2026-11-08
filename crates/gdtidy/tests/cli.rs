@@ -416,3 +416,63 @@ fn every_rule_is_documented() {
         );
     }
 }
+
+#[test]
+fn fix_repairs_what_is_safe_and_reports_the_rest() {
+    let source = "extends Node\n#comment\n\n\nfunc f(x: int) -> void:\n\tpass\n\tprint(x)\n\tif x:\n\t\tpass  # keep this comment\n\t\tprint(x)\n";
+    let dir = project(&[
+        ("gdtidy.toml", "[lint]\nenable = [\"comment-space\"]\n"),
+        ("a.gd", source),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "--fix"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "a.gd:8:3: warning[unnecessary-pass]",
+        ))
+        .stderr(predicate::str::contains("1 problem(s) (1 files, 2 fixed)"));
+    let fixed = fs::read_to_string(dir.path().join("a.gd")).unwrap();
+    assert_eq!(
+        fixed,
+        "extends Node\n# comment\n\n\nfunc f(x: int) -> void:\n\tprint(x)\n\tif x:\n\t\tpass  # keep this comment\n\t\tprint(x)\n"
+    );
+    // A second run has nothing left to fix.
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "--fix"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("1 problem(s) (1 files)"));
+    assert_eq!(fs::read_to_string(dir.path().join("a.gd")).unwrap(), fixed);
+}
+
+#[test]
+fn fix_keeps_crlf_line_ends_and_files_without_a_final_newline() {
+    let dir = project(&[(
+        "a.gd",
+        "extends Node\r\n\r\n\r\nfunc f() -> void:\r\n\tpass\r\n\tprint(1)",
+    )]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "--fix"])
+        .assert()
+        .code(0);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("a.gd")).unwrap(),
+        "extends Node\r\n\r\n\r\nfunc f() -> void:\r\n\tprint(1)"
+    );
+}
+
+#[test]
+fn lint_without_fix_changes_nothing() {
+    let source = "extends Node\n\n\nfunc f() -> void:\n\tpass\n\tprint(1)\n";
+    let dir = project(&[("a.gd", source)]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("lint")
+        .assert()
+        .code(1);
+    assert_eq!(fs::read_to_string(dir.path().join("a.gd")).unwrap(), source);
+}

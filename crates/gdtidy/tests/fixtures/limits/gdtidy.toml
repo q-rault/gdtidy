@@ -1,0 +1,21 @@
+# Small limits, so short functions show each limit rule.
+[lint]
+enable = ["max-function-lines", "max-branches", "max-nesting-depth"]
+
+[lint.rules.max-returns]
+max = 2
+
+[lint.rules.function-arguments-number]
+max = 2
+
+[lint.rules.max-public-methods]
+max = 2
+
+[lint.rules.max-function-lines]
+max = 6
+
+[lint.rules.max-branches]
+max = 2
+
+[lint.rules.max-nesting-depth]
+max = 2

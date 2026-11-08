@@ -1,6 +1,7 @@
 //! Formatter fixtures: `tests/fmt/<case>.in.gd` must format to
 //! `<case>.out.gd`, and `<case>.out.gd` must not change. A `gdtidy.toml` in
-//! a case's folder applies to it.
+//! a case's folder applies to it. The empty `project.godot` there stops the
+//! search for configuration at the fixtures, as a project root does.
 
 use std::fs;
 use std::path::Path;

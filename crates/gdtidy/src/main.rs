@@ -39,11 +39,12 @@ struct MigrateArgs {
     /// The gdlintrc and gdformatrc to convert [default: those in this folder,
     /// with or without a leading dot]
     files: Vec<PathBuf>,
-    /// Print the configuration instead of writing gdtidy.toml
+    /// Print the configuration instead of writing it
     #[arg(long)]
     stdout: bool,
     /// Replace an existing gdtidy.toml; without it, only the sections it
-    /// does not have yet are added
+    /// does not have yet are added. In a gdsuite.toml, existing sections are
+    /// never replaced
     #[arg(long)]
     force: bool,
 }
@@ -430,14 +431,17 @@ fn run_migrate(args: MigrateArgs) -> Result<u8> {
              name the files to convert"
         );
     };
-    let target = first
-        .parent()
-        .unwrap_or(std::path::Path::new(""))
-        .join(config::FILE_NAME);
+    let folder = first.parent().unwrap_or(std::path::Path::new(""));
+    let own_target = folder.join(config::FILE_NAME);
+    let suite_target = folder.join(config::SUITE_FILE_NAME);
+    // A project with a gdsuite.toml and no gdtidy.toml keeps its settings in
+    // gdsuite.toml, so the sections go there.
+    let into_suite = !args.stdout && !own_target.exists() && suite_target.is_file();
+    let target = if into_suite { suite_target } else { own_target };
 
     // Without --force, an existing gdtidy.toml keeps its sections and gets
-    // the missing ones.
-    let existing = if target.exists() && !args.force && !args.stdout {
+    // the missing ones; gdsuite.toml always keeps them.
+    let existing = if target.exists() && (into_suite || (!args.force && !args.stdout)) {
         let text = fs::read_to_string(&target)
             .with_context(|| format!("cannot read {}", target.display()))?;
         let table: toml::Table = text
@@ -464,6 +468,13 @@ fn run_migrate(args: MigrateArgs) -> Result<u8> {
         (&fmt_source, "fmt", migrate::migrate_gdformatrc),
     ] {
         let Some(source) = source else { continue };
+        if has(section) && into_suite && args.force {
+            anyhow::bail!(
+                "{} already has [{section}]; remove it to convert {} again",
+                target.display(),
+                source.display()
+            );
+        }
         if has(section) {
             eprintln!(
                 "gdtidy: {} already has [{section}]; {} is not converted (use --force to replace it)",
@@ -494,6 +505,12 @@ fn run_migrate(args: MigrateArgs) -> Result<u8> {
         );
     }
     let toml = match &existing {
+        Some((text, _)) if into_suite => format!(
+            "{}\n\n# Converted from {} by `gdtidy migrate`.\n{}",
+            text.trim_end(),
+            converted.join(" and "),
+            sections.join("\n")
+        ),
         Some((text, _)) => format!("{}\n{}", text.trim_end(), "\n") + &sections.join("\n"),
         None => format!(
             "# Converted from {} by `gdtidy migrate`.\n\n{}",
@@ -501,7 +518,12 @@ fn run_migrate(args: MigrateArgs) -> Result<u8> {
             sections.join("\n")
         ),
     };
-    config::Config::parse(&toml, None).context("the converted configuration is not valid")?;
+    if into_suite {
+        config::Config::parse_suite(&toml, None)
+    } else {
+        config::Config::parse(&toml, None).map(Some)
+    }
+    .context("the converted configuration is not valid")?;
     if args.stdout {
         print!("{toml}");
         return Ok(OK);

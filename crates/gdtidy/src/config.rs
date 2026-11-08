@@ -14,9 +14,16 @@
 //! continuation-indent = 1          # see fmt::Options
 //! ```
 //!
-//! The file that applies to a script is the first `gdtidy.toml` found walking
-//! up from the script's folder. The walk stops at a folder with a
-//! `project.godot`, so a project never picks up a file from outside it.
+//! The same sections can live in `gdsuite.toml`, next to the other tools'
+//! settings, for a project that keeps them all in one file.
+//!
+//! The settings that apply to a script are the first found walking up from
+//! the script's folder: in each folder, a `gdsuite.toml` with a `[lint]` or
+//! `[fmt]` section comes first, then `gdtidy.toml`. A `gdtidy.toml` next to
+//! such a `gdsuite.toml` is ignored, with a warning: one tool's settings
+//! belong in one file, and the two are not merged. The walk stops at a
+//! folder with a `project.godot`, so a project never picks up a file from
+//! outside it.
 //! Anything gdtidy does not know (a rule, an option, a key, a wrong type) is
 //! an error, so a typo never silently turns a rule off.
 
@@ -31,6 +38,9 @@ use toml::{Table, Value};
 use crate::rules::{self, OptionKind, Rule};
 
 pub const FILE_NAME: &str = "gdtidy.toml";
+
+/// gdsuite's configuration file, which can hold gdtidy's sections.
+pub const SUITE_FILE_NAME: &str = "gdsuite.toml";
 
 /// One option's value.
 #[derive(Debug, Clone, PartialEq)]
@@ -212,6 +222,23 @@ impl Config {
         Ok(config)
     }
 
+    /// Read the `[lint]` and `[fmt]` sections of a `gdsuite.toml`, which
+    /// also holds other tools' sections; `None` when it has neither.
+    pub fn parse_suite(text: &str, root: Option<PathBuf>) -> Result<Option<Self>> {
+        let table: Table = text.parse().map_err(|e| anyhow!("{e}"))?;
+        if !table.contains_key("lint") && !table.contains_key("fmt") {
+            return Ok(None);
+        }
+        let mut config = Config::defaults(root);
+        if let Some(lint) = table.get("lint") {
+            config.read_lint(as_table(lint, "lint")?)?;
+        }
+        if let Some(fmt) = table.get("fmt") {
+            config.read_fmt(as_table(fmt, "fmt")?)?;
+        }
+        Ok(Some(config))
+    }
+
     fn read_fmt(&mut self, fmt: &Table) -> Result<()> {
         for (key, value) in fmt {
             let boolean = || {
@@ -370,7 +397,26 @@ impl Configs {
             return Ok(config.clone());
         }
         let file = dir.join(FILE_NAME);
-        let config = if file.is_file() {
+        let suite = dir.join(SUITE_FILE_NAME);
+        let from_suite = if suite.is_file() {
+            let text = std::fs::read_to_string(&suite)
+                .with_context(|| format!("cannot read {}", suite.display()))?;
+            Config::parse_suite(&text, Some(dir.to_path_buf()))
+                .with_context(|| format!("{}", suite.display()))?
+        } else {
+            None
+        };
+        let config = if let Some(config) = from_suite {
+            if file.is_file() {
+                eprintln!(
+                    "gdtidy: warning: {} has a [lint] or [fmt] section, so {} is ignored. \
+                     Keep gdtidy's settings in one of them.",
+                    suite.display(),
+                    file.display()
+                );
+            }
+            Arc::new(config)
+        } else if file.is_file() {
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("cannot read {}", file.display()))?;
             Arc::new(
@@ -395,6 +441,42 @@ mod tests {
 
     fn parse(text: &str) -> Result<Config> {
         Config::parse(text, None)
+    }
+
+    #[test]
+    fn a_gdsuite_toml_section_comes_before_gdtidy_toml() {
+        let dir = std::env::temp_dir().join(format!("gdtidy-suite-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("project.godot"), "").unwrap();
+        std::fs::write(
+            dir.join("gdtidy.toml"),
+            "[lint]\ndisable = [\"max-line-length\"]\n",
+        )
+        .unwrap();
+        let script = dir.join("a.gd");
+
+        // A gdsuite.toml without [lint] or [fmt] leaves gdtidy.toml in charge.
+        std::fs::write(dir.join("gdsuite.toml"), "[project]\nroot = \".\"\n").unwrap();
+        let config = Configs::default().for_file(&script).unwrap();
+        assert!(!config.is_enabled("max-line-length"));
+
+        // Other tools' sections are not gdtidy's business.
+        std::fs::write(
+            dir.join("gdsuite.toml"),
+            "[project]\nroot = \".\"\n\n[test]\ntimeout = 5\n\n[fmt]\ntrailing-commas = false\n",
+        )
+        .unwrap();
+        let config = Configs::default().for_file(&script).unwrap();
+        // gdtidy.toml is ignored, not merged.
+        assert!(config.is_enabled("max-line-length"));
+        assert!(!config.fmt.trailing_commas);
+
+        std::fs::write(dir.join("gdsuite.toml"), "[lint]\ndisable = [\"nope\"]\n").unwrap();
+        let error = format!("{:#}", Configs::default().for_file(&script).unwrap_err());
+        assert!(error.contains("gdsuite.toml"), "{error}");
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

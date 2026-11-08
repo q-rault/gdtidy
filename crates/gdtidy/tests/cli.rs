@@ -175,14 +175,123 @@ fn rules_publish_a_concern_for_each_rule() {
 }
 
 #[test]
-fn fmt_says_it_is_not_implemented() {
-    let dir = project(&[("main.gd", VALID)]);
+fn fmt_check_lists_files_and_changes_nothing() {
+    let messy = "extends Node
+func f(a,b):
+    return a+b
+";
+    let dir = project(&[("main.gd", VALID), ("messy.gd", messy)]);
     gdtidy()
         .current_dir(dir.path())
         .args(["fmt", "--check"])
         .assert()
-        .code(2)
-        .stderr(predicate::str::contains("not implemented"));
+        .code(1)
+        .stdout(
+            "messy.gd
+",
+        )
+        .stderr(predicate::str::contains("1 file(s) would be formatted"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("messy.gd")).unwrap(),
+        messy
+    );
+}
+
+#[test]
+fn fmt_rewrites_files_in_place() {
+    let dir = project(&[(
+        "main.gd",
+        "extends Node
+func f(a,b):
+	return a+b",
+    )]);
+    gdtidy()
+        .current_dir(dir.path())
+        .arg("fmt")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 file(s) formatted (1 files)"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("main.gd")).unwrap(),
+        "extends Node
+
+
+func f(a, b):
+	return a + b
+"
+    );
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["fmt", "--check"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fmt_diff_prints_a_unified_diff() {
+    let dir = project(&[(
+        "main.gd", "var a=1
+",
+    )]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["fmt", "--diff"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("--- a/main.gd"))
+        .stdout(predicate::str::contains(
+            "-var a=1
++var a = 1",
+        ));
+}
+
+#[test]
+fn fmt_skips_files_with_a_syntax_error() {
+    let dir = project(&[("main.gd", VALID), ("broken.gd", BROKEN)]);
+    let output = gdtidy()
+        .current_dir(dir.path())
+        .args(["fmt", "--check", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["files"], 2);
+    assert_eq!(report["changed"], serde_json::json!([]));
+    assert_eq!(report["skipped"][0]["path"], "broken.gd");
+    assert_eq!(report["skipped"][0]["reason"], "syntax-error");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("broken.gd")).unwrap(),
+        BROKEN
+    );
+}
+
+#[test]
+fn fmt_exclude_is_its_own() {
+    let dir = project(&[
+        (
+            "gdtidy.toml",
+            "[fmt]
+exclude = [\"gen\"]
+",
+        ),
+        (
+            "gen/a.gd", "var a=1
+",
+        ),
+        (
+            "b.gd", "var b=1
+",
+        ),
+    ]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["fmt", "--check"])
+        .assert()
+        .code(1)
+        .stdout(
+            "b.gd
+",
+        );
 }
 
 // ---- M1: configuration, silencing comments, SARIF ----

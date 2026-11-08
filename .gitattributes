@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Formatter fixtures are kept byte for byte.
+crates/gdtidy/tests/fmt/** -text

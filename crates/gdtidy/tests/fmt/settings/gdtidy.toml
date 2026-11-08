@@ -1,0 +1,3 @@
+[fmt]
+continuation-indent = 1
+dict-brace-spaces = false

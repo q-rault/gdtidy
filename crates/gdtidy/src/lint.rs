@@ -42,6 +42,8 @@ pub enum SkipReason {
     SyntaxError,
     /// The file is not UTF-8, which Godot refuses too.
     NotUtf8,
+    /// `gdtidy fmt` only: the formatted text failed the safety check.
+    Unsafe,
 }
 
 /// What linting one file gave.

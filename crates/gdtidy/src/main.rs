@@ -1,5 +1,6 @@
 mod config;
 mod discover;
+mod fmt;
 mod lint;
 mod migrate;
 mod rules;
@@ -23,7 +24,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Format GDScript files (not implemented yet)
+    /// Format GDScript files, following the official style guide
     Fmt(FmtArgs),
     /// Report style and convention problems in GDScript files
     Lint(LintArgs),
@@ -47,12 +48,18 @@ struct MigrateArgs {
 
 #[derive(Args)]
 struct FmtArgs {
-    /// Files or folders to format
+    /// Files or folders to format; `-` reads standard input and writes
+    /// standard output
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
-    /// Report files that would change, without writing them
+    /// Change nothing; list the files that would change
     #[arg(long)]
     check: bool,
+    /// Change nothing; print the changes as a unified diff
+    #[arg(long)]
+    diff: bool,
+    #[arg(long, value_enum, default_value_t = RulesFormat::Text)]
+    format: RulesFormat,
 }
 
 #[derive(Args)]
@@ -109,9 +116,177 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Serialize)]
+struct FmtReport {
+    version: u32,
+    files: usize,
+    /// Files that were formatted, or with --check or --diff, would be.
+    changed: Vec<String>,
+    skipped: Vec<lint::Skipped>,
+}
+
+enum Formatted {
+    Unchanged,
+    Changed { before: String, after: String },
+    Skipped(lint::Skipped),
+}
+
+fn format_bytes(shown: &str, bytes: &[u8], options: &fmt::Options) -> Formatted {
+    match fmt::format(bytes, options) {
+        Ok(after) if after.as_bytes() == bytes => Formatted::Unchanged,
+        Ok(after) => Formatted::Changed {
+            before: String::from_utf8_lossy(bytes).into_owned(),
+            after,
+        },
+        Err(failure) => Formatted::Skipped(match failure {
+            fmt::Failure::Syntax {
+                line,
+                column,
+                message,
+                not_utf8,
+            } => lint::Skipped {
+                path: shown.to_string(),
+                line,
+                column,
+                reason: if not_utf8 {
+                    lint::SkipReason::NotUtf8
+                } else {
+                    lint::SkipReason::SyntaxError
+                },
+                message,
+            },
+            fmt::Failure::Unsafe => lint::Skipped {
+                path: shown.to_string(),
+                line: 1,
+                column: 1,
+                reason: lint::SkipReason::Unsafe,
+                message: "formatting would have changed the code, so the file was left as it is; \
+                          this is a gdtidy bug, please report it"
+                    .to_string(),
+            },
+        }),
+    }
+}
+
 fn fmt(args: FmtArgs) -> Result<u8> {
-    let _ = (args.paths, args.check);
-    anyhow::bail!("formatting is not implemented yet")
+    if args.paths.len() == 1 && args.paths[0].as_os_str() == "-" {
+        return fmt_stdin(&args);
+    }
+    let mut configs = config::Configs::default();
+    let mut jobs = Vec::new();
+    for target in discover::gdscript_files(&args.paths)? {
+        let config = configs.for_file(&target.path)?;
+        if !target.explicit && config.fmt_excludes(&std::path::absolute(&target.path)?) {
+            continue;
+        }
+        jobs.push((target.path, config));
+    }
+    let write = !args.check && !args.diff;
+    let outcomes: Vec<(String, Formatted)> = jobs
+        .par_iter()
+        .map(|(path, config)| {
+            let shown = discover::display_path(path);
+            let bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
+            let outcome = format_bytes(&shown, &bytes, &config.fmt);
+            if write && let Formatted::Changed { after, .. } = &outcome {
+                fs::write(path, after).with_context(|| format!("cannot write {shown}"))?;
+            }
+            Ok((shown, outcome))
+        })
+        .collect::<Result<_>>()?;
+
+    let mut report = FmtReport {
+        version: 1,
+        files: jobs.len(),
+        changed: Vec::new(),
+        skipped: Vec::new(),
+    };
+    for (shown, outcome) in &outcomes {
+        match outcome {
+            Formatted::Unchanged => {}
+            Formatted::Changed { before, after } => {
+                report.changed.push(shown.clone());
+                if args.diff && matches!(args.format, RulesFormat::Text) {
+                    print!("{}", unified_diff(shown, before, after));
+                }
+            }
+            Formatted::Skipped(skipped) => report.skipped.push(skipped.clone()),
+        }
+    }
+    match args.format {
+        RulesFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        RulesFormat::Text => {
+            if args.check {
+                for path in &report.changed {
+                    println!("{path}");
+                }
+            }
+            for s in &report.skipped {
+                eprintln!("{}:{}:{}: skipped: {}", s.path, s.line, s.column, s.message);
+            }
+            let verb = if write {
+                "formatted"
+            } else {
+                "would be formatted"
+            };
+            let mut summary = format!(
+                "gdtidy: {} file(s) {verb} ({} files",
+                report.changed.len(),
+                report.files
+            );
+            if !report.skipped.is_empty() {
+                summary += &format!(", {} skipped", report.skipped.len());
+            }
+            eprintln!("{summary})");
+        }
+    }
+    Ok(if !report.skipped.is_empty() {
+        FAILED
+    } else if !write && !report.changed.is_empty() {
+        PROBLEMS
+    } else {
+        OK
+    })
+}
+
+/// `gdtidy fmt -`: for editors. The settings are those of the current folder.
+fn fmt_stdin(args: &FmtArgs) -> Result<u8> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    std::io::stdin().read_to_end(&mut bytes)?;
+    let config = config::Configs::default().for_file(std::path::Path::new("stdin.gd"))?;
+    match format_bytes("<stdin>", &bytes, &config.fmt) {
+        Formatted::Unchanged => {
+            if !args.check && !args.diff {
+                std::io::Write::write_all(&mut std::io::stdout(), &bytes)?;
+            }
+            Ok(OK)
+        }
+        Formatted::Changed { before, after } => {
+            if args.diff {
+                print!("{}", unified_diff("<stdin>", &before, &after));
+            } else if !args.check {
+                print!("{after}");
+            }
+            Ok(if args.check || args.diff {
+                PROBLEMS
+            } else {
+                OK
+            })
+        }
+        Formatted::Skipped(s) => {
+            eprintln!("{}:{}:{}: skipped: {}", s.path, s.line, s.column, s.message);
+            Ok(FAILED)
+        }
+    }
+}
+
+fn unified_diff(path: &str, before: &str, after: &str) -> String {
+    similar::TextDiff::from_lines(before, after)
+        .unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{path}"), &format!("b/{path}"))
+        .to_string()
 }
 
 #[derive(Serialize)]

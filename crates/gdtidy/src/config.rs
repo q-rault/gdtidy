@@ -9,6 +9,9 @@
 //! [lint.rules.max-line-length]
 //! max = 130
 //! tab-width = 1
+//!
+//! [fmt]
+//! continuation-indent = 1          # see fmt::Options
 //! ```
 //!
 //! The file that applies to a script is the first `gdtidy.toml` found walking
@@ -137,6 +140,9 @@ pub struct Config {
     /// The rules that run, in registry order, with their options.
     pub rules: Vec<(&'static Rule, RuleOptions)>,
     pub exclude: Vec<String>,
+    /// `[fmt]`: the formatter's settings and its own `exclude`.
+    pub fmt: crate::fmt::Options,
+    pub fmt_exclude: Vec<String>,
 }
 
 impl Config {
@@ -149,6 +155,8 @@ impl Config {
                 .map(|r| (r, RuleOptions::defaults(r)))
                 .collect(),
             exclude: Vec::new(),
+            fmt: crate::fmt::Options::default(),
+            fmt_exclude: Vec::new(),
         }
     }
 
@@ -160,6 +168,15 @@ impl Config {
     /// `.gitignore`, a name alone (`reports`) matches a folder at any depth,
     /// and a path (`tools/gen`, `/reports`) is relative to the root.
     pub fn excludes(&self, path: &Path) -> bool {
+        self.excludes_in(&self.exclude, path)
+    }
+
+    /// Whether `path` is under one of `[fmt] exclude`'s folders.
+    pub fn fmt_excludes(&self, path: &Path) -> bool {
+        self.excludes_in(&self.fmt_exclude, path)
+    }
+
+    fn excludes_in(&self, exclude: &[String], path: &Path) -> bool {
         let Some(root) = &self.root else {
             return false;
         };
@@ -169,7 +186,7 @@ impl Config {
         let relative = relative.to_string_lossy().replace('\\', "/");
         let parts: Vec<&str> = relative.split('/').collect();
         let folders = &parts[..parts.len().saturating_sub(1)];
-        self.exclude.iter().any(|entry| {
+        exclude.iter().any(|entry| {
             let entry = entry.trim_end_matches('/');
             match entry.strip_prefix('/') {
                 None if !entry.contains('/') => folders.contains(&entry),
@@ -188,12 +205,37 @@ impl Config {
         for (key, value) in &table {
             match key.as_str() {
                 "lint" => config.read_lint(as_table(value, "lint")?)?,
-                // Read by `gdtidy fmt` once it exists (RFC 0003).
-                "fmt" => {}
+                "fmt" => config.read_fmt(as_table(value, "fmt")?)?,
                 other => bail!("unknown section `{other}`; expected `lint` or `fmt`"),
             }
         }
         Ok(config)
+    }
+
+    fn read_fmt(&mut self, fmt: &Table) -> Result<()> {
+        for (key, value) in fmt {
+            let boolean = || {
+                value
+                    .as_bool()
+                    .ok_or_else(|| anyhow!("`fmt.{key}` must be true or false"))
+            };
+            match key.as_str() {
+                "exclude" => self.fmt_exclude = string_list(value, "fmt.exclude")?,
+                "continuation-indent" => {
+                    self.fmt.continuation_indent = match value.as_integer() {
+                        Some(n @ 1..=4) => n as usize,
+                        _ => bail!("`fmt.continuation-indent` must be 1, 2, 3 or 4"),
+                    }
+                }
+                "dict-brace-spaces" => self.fmt.dict_brace_spaces = boolean()?,
+                "trailing-commas" => self.fmt.trailing_commas = boolean()?,
+                other => bail!(
+                    "unknown key `fmt.{other}`; expected `exclude`, `continuation-indent`, \
+                     `dict-brace-spaces` or `trailing-commas`"
+                ),
+            }
+        }
+        Ok(())
     }
 
     fn read_lint(&mut self, lint: &Table) -> Result<()> {
@@ -393,6 +435,22 @@ mod tests {
         );
         assert!(error("[lnit]\n").contains("unknown section"));
         assert!(error("[lint]\nignore = []\n").contains("unknown key"));
+        assert!(error("[fmt]\nindent = 1\n").contains("unknown key `fmt.indent`"));
+        assert!(error("[fmt]\ncontinuation-indent = 0\n").contains("must be 1, 2, 3 or 4"));
+        assert!(error("[fmt]\ntrailing-commas = 1\n").contains("true or false"));
+    }
+
+    #[test]
+    fn fmt_settings() {
+        let config = parse(
+            "[fmt]\ncontinuation-indent = 1\ndict-brace-spaces = false\nexclude = [\"gen\"]\n",
+        )
+        .unwrap();
+        assert_eq!(config.fmt.continuation_indent, 1);
+        assert!(!config.fmt.dict_brace_spaces);
+        assert!(config.fmt.trailing_commas);
+        assert_eq!(config.fmt_exclude, ["gen"]);
+        assert!(config.exclude.is_empty());
     }
 
     #[test]

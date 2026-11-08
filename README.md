@@ -2,7 +2,7 @@
 
 Formats and lints GDScript, following the [official Godot style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html). It is one fast binary with no Python, and is meant to replace `gdformat` and `gdlint` in [gdsuite](https://github.com/q-rault/gdsuite).
 
-> **Status: early.** `gdtidy lint` finds the files to check and parses them with Godot's own grammar. Style rules and `gdtidy fmt` are not written yet.
+> **Status: early.** `gdtidy lint` has its configuration, silencing comments and outputs, but only one rule so far (`max-line-length`). The rest of gdlint's rules are planned in [RFC 0002](rfcs/0002-lint-rules.md). `gdtidy fmt` is not written yet.
 
 ## Install
 
@@ -16,11 +16,38 @@ cargo install --path crates/gdtidy
 gdtidy lint                  # the whole project
 gdtidy lint player/ hud.gd   # only these files and folders
 gdtidy lint --format json    # for tools and agents
-gdtidy rules                 # every rule gdtidy can report
+gdtidy lint --format sarif   # for GitHub code scanning
+gdtidy rules                 # every rule gdtidy can report (see docs/rules.md)
 gdtidy fmt                   # not implemented yet
 ```
 
 When walking a folder, gdtidy skips hidden folders, `addons`, folders with a `.gdignore`, and nested Godot projects, as the editor does. A file or folder you name directly is always checked.
+
+### Configuration
+
+`gdtidy.toml` sits next to `project.godot` (or in any folder under it). For each script, gdtidy uses the nearest one above it, never one outside the project:
+
+```toml
+[lint]
+disable = ["max-line-length"]   # rules that are on by default
+enable = []                     # rules that are off by default
+exclude = ["generated"]         # folders to skip, relative to this file
+
+[lint.rules.max-line-length]
+max = 130
+```
+
+An unknown rule, option or key is an error, so a typo never turns a rule off.
+
+### Silencing a rule
+
+```gdscript
+var x = 1  # gdtidy: ignore=rule-name     (this line and the next)
+# gdtidy: disable=rule-name               (until enable, or the end of the file)
+# gdtidy: enable=rule-name
+```
+
+gdlint's comments (`# gdlint: ignore=...`) and GDQuest's (`# gdlint-ignore-next-line ...`) work too, so a project moving from either needs no edits.
 
 A file with a syntax error is skipped, not reported as a problem: syntax errors are Godot's to report, so in gdsuite they come from gdtypecheck. gdtidy still lists the file and Godot's message on stderr (and under `skipped` in JSON), and exits with `2`, so a run that left files out never looks clean.
 

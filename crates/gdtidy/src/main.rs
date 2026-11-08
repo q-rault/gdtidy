@@ -1,11 +1,15 @@
+mod config;
 mod discover;
 mod lint;
 mod rules;
+mod sarif;
+mod suppress;
 
 use std::{fs, path::PathBuf, process::ExitCode};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use rayon::prelude::*;
 use serde::Serialize;
 
 /// Format and lint GDScript, following the official Godot style guide.
@@ -41,18 +45,26 @@ struct LintArgs {
     /// Files or folders to lint
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    format: Format,
+    #[arg(long, value_enum, default_value_t = LintFormat::Text)]
+    format: LintFormat,
 }
 
 #[derive(Args)]
 struct RulesArgs {
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    format: Format,
+    #[arg(long, value_enum, default_value_t = RulesFormat::Text)]
+    format: RulesFormat,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum Format {
+enum LintFormat {
+    Text,
+    Json,
+    /// SARIF 2.1.0, for GitHub code scanning
+    Sarif,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum RulesFormat {
     Text,
     Json,
 }
@@ -105,25 +117,47 @@ fn lint_exit_code(report: &LintReport) -> u8 {
 }
 
 fn run_lint(args: LintArgs) -> Result<u8> {
-    let files = discover::gdscript_files(&args.paths)?;
+    // Configurations are found first, in order, so errors in them are
+    // reported the same way every time; the files are then linted in
+    // parallel, and the results keep the files' order.
+    let mut configs = config::Configs::default();
+    let mut jobs = Vec::new();
+    for target in discover::gdscript_files(&args.paths)? {
+        let config = configs.for_file(&target.path)?;
+        if !target.explicit && config.excludes(&std::path::absolute(&target.path)?) {
+            continue;
+        }
+        jobs.push((target.path, config));
+    }
+    let outcomes: Vec<lint::Outcome> = jobs
+        .par_iter()
+        .map(|(path, config)| {
+            let shown = discover::display_path(path);
+            let bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
+            Ok(lint::lint_file(shown, &bytes, config))
+        })
+        .collect::<Result<_>>()?;
+
     let mut report = LintReport {
         version: 1,
-        files: files.len(),
+        files: jobs.len(),
         diagnostics: Vec::new(),
         skipped: Vec::new(),
     };
-    for file in &files {
-        let bytes = fs::read(file)
-            .with_context(|| format!("cannot read {}", discover::display_path(file)))?;
-        match lint::lint_file(file, bytes) {
+    for outcome in outcomes {
+        match outcome {
             lint::Outcome::Checked(diagnostics) => report.diagnostics.extend(diagnostics),
             lint::Outcome::Skipped(skipped) => report.skipped.push(skipped),
         }
     }
 
     match args.format {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        Format::Text => {
+        LintFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        LintFormat::Sarif => println!(
+            "{}",
+            serde_json::to_string_pretty(&sarif::report(&report.diagnostics, &report.skipped))?
+        ),
+        LintFormat::Text => {
             for d in &report.diagnostics {
                 println!(
                     "{}:{}:{}: {}[{}]: {}",
@@ -154,15 +188,11 @@ fn run_lint(args: LintArgs) -> Result<u8> {
 
 fn list_rules(args: RulesArgs) -> Result<u8> {
     match args.format {
-        Format::Json => println!("{}", serde_json::to_string_pretty(rules::RULES)?),
-        Format::Text => {
+        RulesFormat::Json => println!("{}", serde_json::to_string_pretty(rules::RULES)?),
+        RulesFormat::Text => {
             for rule in rules::RULES {
-                println!(
-                    "{:<16} {:<8} {}",
-                    rule.id,
-                    rule.severity.as_str(),
-                    rule.summary
-                );
+                let state = if rule.default_enabled { "on" } else { "off" };
+                println!("{:<28} {:<4} {}", rule.id, state, rule.summary);
             }
         }
     }

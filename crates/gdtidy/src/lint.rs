@@ -1,10 +1,10 @@
-//! `gdtidy lint`.
-
-use std::path::Path;
+//! `gdtidy lint` for one file.
 
 use serde::Serialize;
 
-use crate::rules::Severity;
+use crate::config::Config;
+use crate::rules::{self, Context, Finding, Rule, Severity};
+use crate::suppress::Suppressions;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
@@ -15,6 +15,8 @@ pub struct Diagnostic {
     pub end_column: usize,
     pub severity: Severity,
     pub rule: &'static str,
+    pub concern: &'static str,
+    pub fixable: bool,
     pub message: String,
 }
 
@@ -45,34 +47,73 @@ pub enum Outcome {
     Skipped(Skipped),
 }
 
-/// Lint one file's contents.
-pub fn lint_file(path: &Path, bytes: Vec<u8>) -> Outcome {
-    let shown = crate::discover::display_path(path);
-    let source = match String::from_utf8(bytes) {
-        Ok(source) => source,
-        Err(error) => {
-            let valid = &error.as_bytes()[..error.utf8_error().valid_up_to()];
-            let before = String::from_utf8_lossy(valid);
-            return Outcome::Skipped(Skipped {
-                path: shown,
-                line: before.matches('\n').count() + 1,
-                column: before.rsplit('\n').next().unwrap_or("").chars().count() + 1,
-                reason: SkipReason::NotUtf8,
-                message: "the file is not valid UTF-8".to_string(),
-            });
-        }
-    };
-    let tree = gdsyntax::parse(source);
+/// Lint one file's contents with the rules `config` turns on.
+pub fn lint_file(shown: String, bytes: &[u8], config: &Config) -> Outcome {
+    let tree = gdsyntax::parse_bytes(bytes);
     // Rules would only add noise on a broken tree, so a file that does not
     // parse is left out, with Godot's first message as the reason.
-    if let Some(error) = tree.errors().first() {
+    if let Some(error) = tree.errors().into_iter().next() {
+        let reason = if error.message == gdsyntax::INVALID_UTF8_MESSAGE {
+            SkipReason::NotUtf8
+        } else {
+            SkipReason::SyntaxError
+        };
         return Outcome::Skipped(Skipped {
             path: shown,
             line: error.start.line,
             column: error.start.column,
-            reason: SkipReason::SyntaxError,
-            message: error.message.clone(),
+            reason,
+            message: error.message,
         });
     }
-    Outcome::Checked(Vec::new())
+
+    let suppressions = Suppressions::read(&tree);
+    let mut diagnostics = Vec::new();
+    let mut report = |rule: &'static Rule, finding: Finding| {
+        let start = tree.position(finding.range.start);
+        if suppressions.is_suppressed(rule.id, start.line) {
+            return;
+        }
+        let end = tree.position(finding.range.end);
+        diagnostics.push(Diagnostic {
+            path: shown.clone(),
+            line: start.line,
+            column: start.column,
+            end_line: end.line,
+            end_column: end.column,
+            severity: Severity::Warning,
+            rule: rule.id,
+            concern: rule.concern,
+            fixable: rule.fixable,
+            message: finding.message,
+        });
+    };
+
+    for (rule, options) in &config.rules {
+        let Some(check) = rule.check else { continue };
+        let mut findings = Vec::new();
+        check(
+            &Context {
+                tree: &tree,
+                options,
+            },
+            &mut findings,
+        );
+        for finding in findings {
+            report(rule, finding);
+        }
+    }
+    if config.is_enabled(rules::UNKNOWN_RULE_IN_COMMENT.id) {
+        for (range, name) in &suppressions.unknown {
+            report(
+                &rules::UNKNOWN_RULE_IN_COMMENT,
+                Finding {
+                    range: range.clone(),
+                    message: format!("`{name}` is not a rule gdtidy knows (see `gdtidy rules`)."),
+                },
+            );
+        }
+    }
+    diagnostics.sort_by(|a, b| (a.line, a.column, a.rule).cmp(&(b.line, b.column, b.rule)));
+    Outcome::Checked(diagnostics)
 }

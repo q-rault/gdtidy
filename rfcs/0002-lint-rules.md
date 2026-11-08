@@ -1,6 +1,6 @@
 # RFC 0002: Lint rules for gdtidy
 
-Status: proposed, 2026-11-08. Target: replace `gdlint` (gdtoolkit 4.x) in gdsuite.
+Status: in progress, 2026-11-08. M1 done. Target: replace `gdlint` (gdtoolkit 4.x) in gdsuite.
 
 ## Summary
 
@@ -147,8 +147,10 @@ A fourth option is `_` separators in large numbers, off by default, because no t
 
 ```toml
 [lint]
-# Rules not to run.
+# Rules on by default not to run.
 disable = ["max-public-methods"]
+# Rules off by default to run.
+enable = ["file-name"]
 # Extra folders to skip. Hidden folders, addons, .gdignore folders and nested
 # projects are always skipped, as now.
 exclude = ["reports"]
@@ -166,7 +168,7 @@ sections = ["tools", "classnames", "extends", "docstrings", "signals", "enums",
             "onreadypubvars", "onreadyprvvars", "others"]
 ```
 
-- An unknown rule name or option is an error (exit 2), so a typo never silently turns a rule off.
+- An unknown rule name or option is an error (exit 2), so a typo never silently turns a rule off. A rule this RFC plans but that is not implemented yet gets its own message.
 - Patterns are full-match regular expressions, as in gdlint, compiled once per run with the `regex` crate.
 - `gdtidy rules --format json` lists each rule's options with their defaults and types, so gdsuite can check the file too.
 
@@ -191,7 +193,7 @@ var x = 1  # gdtidy: ignore=function-variable-name
 # gdtidy: enable=max-returns
 ```
 
-- **gdlint's spellings:** `# gdlint: ignore=...` and its `disable`/`enable` forms are read too, so existing projects need no edits. So are GDQuest's `# gdlint-ignore rule` and `# gdlint-ignore-next-line rule`.
+- **gdlint's spellings:** `# gdlint: ignore=...` and its `disable`/`enable` forms are read too, so existing projects need no edits. So are GDQuest's `# gdlint-ignore rule` and `# gdlint-ignore-next-line rule`. GDQuest's names for gdtidy rules work in comments too: `private-access` (for `private-call`), `enum-member-name` (for `enum-element-name`), and `variable-name` (for both variable naming rules).
 - **Comma-separated lists** are accepted, as in gdlint.
 - **Unknown names:** a comment naming a rule gdtidy does not have is reported once, as `unknown-rule-in-comment` (concern `suppression-comments`). The exception is a gdlint rule that moved to another tool; that is silently accepted, so old comments don't become noise.
 - **Comments are found as tokens,** not with a regex over the text, so `# gdtidy:` inside a string never counts.

@@ -5,18 +5,29 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use walkdir::{DirEntry, WalkDir};
 
+/// A script to process, and whether it was named directly (so configured
+/// exclusions do not apply to it).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Target {
+    pub path: PathBuf,
+    pub explicit: bool,
+}
+
 /// The `.gd` files under `targets`. A `.gd` file named directly is always
 /// included, and naming any other file is an error.
 /// When walking a folder, hidden folders, `addons`, folders containing a
 /// `.gdignore`, and nested Godot projects are skipped, as Godot's editor does.
-pub fn gdscript_files(targets: &[PathBuf]) -> Result<Vec<PathBuf>> {
+pub fn gdscript_files(targets: &[PathBuf]) -> Result<Vec<Target>> {
     let mut files = Vec::new();
     for target in targets {
         if target.is_file() {
             if !is_gdscript(target) {
                 bail!("{}: not a GDScript (.gd) file", target.display());
             }
-            files.push(target.clone());
+            files.push(Target {
+                path: target.clone(),
+                explicit: true,
+            });
         } else if target.is_dir() {
             let walker = WalkDir::new(target)
                 .into_iter()
@@ -24,15 +35,20 @@ pub fn gdscript_files(targets: &[PathBuf]) -> Result<Vec<PathBuf>> {
             for entry in walker {
                 let entry = entry?;
                 if entry.file_type().is_file() && is_gdscript(entry.path()) {
-                    files.push(entry.into_path());
+                    files.push(Target {
+                        path: entry.into_path(),
+                        explicit: false,
+                    });
                 }
             }
         } else {
             bail!("{}: no such file or folder", target.display());
         }
     }
-    files.sort();
-    files.dedup();
+    // Sorted by path, explicit first, so the explicit copy of a duplicate
+    // is the one kept.
+    files.sort_by(|a, b| a.path.cmp(&b.path).then(b.explicit.cmp(&a.explicit)));
+    files.dedup_by(|a, b| a.path == b.path);
     Ok(files)
 }
 

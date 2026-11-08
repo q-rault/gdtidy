@@ -24,9 +24,9 @@ toml = "0.8"
 walkdir = "2.5"
 yaml-rust2 = "0.10"
 
-# Lives in its own repository, checked out next to this one until it is on
-# crates.io. Publishing gdtidy drops the path and uses the version.
-gdsyntax = { path = "../gdsyntax", version = "0.1.3" }
+# From crates.io. To try unreleased gdsyntax changes, add to
+# .cargo/config.toml: [patch.crates-io] gdsyntax = { path = "../gdsyntax" }
+gdsyntax = "0.1.3"
 
 [profile.release]
 lto = "thin"

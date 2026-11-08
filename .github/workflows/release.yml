@@ -28,22 +28,9 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
-    defaults:
-      run:
-        working-directory: gdtidy
 
     steps:
       - uses: actions/checkout@v5
-        with:
-          path: gdtidy
-
-      # gdtidy builds against gdsyntax checked out next to it. Use the release
-      # that Cargo.lock records, so the binaries match the crates.io build.
-      - name: Check out gdsyntax
-        shell: bash
-        run: |
-          VERSION=$(grep -A1 '^name = "gdsyntax"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
-          git clone --depth 1 --branch "v${VERSION}" https://github.com/q-rault/gdsyntax.git ../gdsyntax
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -60,12 +47,12 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('gdtidy/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build
-        run: cargo build --release -p gdtidy --target ${{ matrix.target }} --locked
+        run: cargo build --release --target ${{ matrix.target }} --locked -p gdtidy
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
@@ -79,7 +66,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/gdtidy" "${PACKAGE_DIR}/"
           cp README.md LICENSE-MIT LICENSE-APACHE LICENSE.md "${PACKAGE_DIR}/"
           tar czf "${ARCHIVE}" "${PACKAGE_DIR}"
-          echo "ARCHIVE=gdtidy/${ARCHIVE}" >> "$GITHUB_ENV"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Package (Windows)
         if: matrix.archive == 'zip'
@@ -93,7 +80,7 @@ jobs:
           Copy-Item "target\${{ matrix.target }}\release\gdtidy.exe" "$PackageDir\"
           Copy-Item "README.md","LICENSE-MIT","LICENSE-APACHE","LICENSE.md" $PackageDir
           Compress-Archive -Path $PackageDir -DestinationPath $Archive
-          "ARCHIVE=gdtidy/$Archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ARCHIVE=$Archive" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -108,20 +95,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    defaults:
-      run:
-        working-directory: gdtidy
 
     steps:
       - uses: actions/checkout@v5
-        with:
-          path: gdtidy
-
-      - name: Check out gdsyntax
-        shell: bash
-        run: |
-          VERSION=$(grep -A1 '^name = "gdsyntax"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
-          git clone --depth 1 --branch "v${VERSION}" https://github.com/q-rault/gdsyntax.git ../gdsyntax
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -139,9 +115,8 @@ jobs:
         uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
-      # The published crate depends on gdsyntax from crates.io, not the checkout.
       - name: Publish
-        run: cargo publish -p gdtidy --locked
+        run: cargo publish --locked -p gdtidy
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 

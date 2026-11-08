@@ -14,18 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-    defaults:
-      run:
-        working-directory: gdtidy
     steps:
-      # gdtidy builds against gdsyntax checked out next to it, as locally.
       - uses: actions/checkout@v5
-        with:
-          path: gdtidy
-      - uses: actions/checkout@v5
-        with:
-          repository: q-rault/gdsyntax
-          path: gdsyntax
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -34,12 +24,11 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            gdtidy/target
-          key: ${{ runner.os }}-v3-cargo-${{ hashFiles('gdtidy/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-v4-cargo-${{ hashFiles('Cargo.lock') }}
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       # In its own folder: packaging points the build tracking in target/ at the
       # packaged sources, and the cache would then keep later builds stale.
-      # The packaged crate uses gdsyntax from crates.io, not the checkout.
       - run: cargo package --workspace --locked --target-dir "${{ runner.temp }}/package"

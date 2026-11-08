@@ -849,10 +849,16 @@ fn fingerprint(root: &SyntaxNode) -> Fingerprint {
             K::AMPERSAND_AMPERSAND => (K::AND_KW, "and".to_string()),
             K::PIPE_PIPE => (K::OR_KW, "or".to_string()),
             K::BANG => (K::NOT_KW, "not".to_string()),
-            // `- 1` may become `-1`, which Godot reads as one token.
-            K::INT | K::FLOAT if token.text().starts_with('-') => {
+            // `- 1` may become `-1`, and `+.5` become `+0.5`, which Godot
+            // reads as one token.
+            K::INT | K::FLOAT if token.text().starts_with(['-', '+']) => {
                 let depth = depth_of(&token);
-                code.push((K::MINUS, "-".to_string(), depth));
+                let (sign, sign_kind) = if token.text().starts_with('-') {
+                    ("-", K::MINUS)
+                } else {
+                    ("+", K::PLUS)
+                };
+                code.push((sign_kind, sign.to_string(), depth));
                 let text = &token.text()[1..];
                 let value = if kind == K::INT {
                     format!("{:?}", literal::int_value(text))

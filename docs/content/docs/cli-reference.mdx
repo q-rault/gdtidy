@@ -1,0 +1,56 @@
+---
+title: CLI Reference
+description: Every gdtidy command and flag.
+---
+
+```sh
+gdtidy fmt [--check | --diff] [--format text|json] [PATHS]...
+gdtidy lint [--fix] [--format text|json|sarif] [PATHS]...
+gdtidy rules [--format text|json]
+gdtidy migrate [--stdout] [--force] [FILES]...
+```
+
+`PATHS` default to the current folder. In `gdtidy fmt`, `-` reads standard
+input and writes standard output.
+
+## gdtidy fmt
+
+| Flag | Description |
+|---|---|
+| `--check` | Change nothing; list the files that would change |
+| `--diff` | Change nothing; print the changes as a unified diff |
+| `--format <FORMAT>` | `text` (default) or `json` |
+
+See [Formatting](/docs/formatting).
+
+## gdtidy lint
+
+| Flag | Description |
+|---|---|
+| `--fix` | Repair the problems that can be repaired safely, then report the rest |
+| `--format <FORMAT>` | `text` (default), `json`, or `sarif` (SARIF 2.1.0, for GitHub code scanning) |
+
+See [Linting](/docs/linting).
+
+## gdtidy rules
+
+Lists every rule with whether it is on by default. `--format json` adds each
+rule's concern and options.
+
+## gdtidy migrate
+
+| Flag | Description |
+|---|---|
+| `--stdout` | Print the configuration instead of writing it |
+| `--force` | Replace an existing `gdtidy.toml`; without it, only the sections it does not have yet are added. In a `gdsuite.toml`, existing sections are never replaced |
+
+`FILES` default to `gdlintrc` and `gdformatrc` in the current folder, with or
+without a leading dot. See [Moving from gdtoolkit](/docs/migrate-from-gdtoolkit).
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | No problems |
+| `1` | Problems found, or files that would change |
+| `2` | The check could not run, or some files could not be checked |

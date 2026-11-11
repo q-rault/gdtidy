@@ -1,0 +1,42 @@
+---
+title: Installation
+description: Install gdtidy from a release binary, crates.io, or source.
+---
+
+## Download a release binary
+
+Each [GitHub release](https://github.com/q-rault/gdtidy/releases) has a binary
+for each platform, no Rust needed:
+
+| Platform | Archive |
+| --- | --- |
+| macOS arm64 | `gdtidy-*-aarch64-apple-darwin.tar.gz` |
+| macOS x86_64 | `gdtidy-*-x86_64-apple-darwin.tar.gz` |
+| Linux x86_64 | `gdtidy-*-x86_64-unknown-linux-musl.tar.gz` |
+| Windows x86_64 | `gdtidy-*-x86_64-pc-windows-msvc.zip` |
+
+Put the `gdtidy` binary on your `PATH`. With [gdsuite](https://q-rault.github.io/gdsuite/),
+`gdsuite setup` downloads the version it was tested with for you.
+
+## Install from crates.io
+
+Requires Rust 1.96 or later.
+
+```sh
+cargo install gdtidy
+```
+
+## Install from source
+
+```sh
+git clone https://github.com/q-rault/gdtidy
+cd gdtidy
+cargo install --path crates/gdtidy
+```
+
+## Verify
+
+```sh
+gdtidy --version
+gdtidy lint
+```

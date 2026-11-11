@@ -1,0 +1,65 @@
+---
+title: Linting
+description: Run gdtidy lint, fix what is safe to fix, silence a rule, and read the exit codes.
+---
+
+```sh
+gdtidy lint                  # the whole project
+gdtidy lint player/ hud.gd   # only these files and folders
+gdtidy lint --format json    # for tools and agents
+gdtidy lint --format sarif   # SARIF 2.1.0, for GitHub code scanning
+gdtidy lint --fix            # repair what is safe to repair, report the rest
+gdtidy rules                 # every rule gdtidy can report
+```
+
+When walking a folder, gdtidy skips hidden folders, `addons`, folders with a
+`.gdignore`, and nested Godot projects, as the editor does. A file or folder
+you name directly is always checked.
+
+The [Lint Rules](/docs/rules) page describes every rule and its options.
+
+## Fixing
+
+`gdtidy lint --fix` repairs `unnecessary-pass` and `comment-space`, then
+reports what is left. A fix is applied only if the fixed file still parses and
+has the same code apart from what the fix removes; otherwise the file is left
+as it is.
+
+## Silencing a rule
+
+```gdscript
+var x = 1  # gdtidy: ignore=rule-name     (this line and the next)
+# gdtidy: disable=rule-name               (until enable, or the end of the file)
+# gdtidy: enable=rule-name
+```
+
+gdlint's comments (`# gdlint: ignore=...`) and GDQuest's
+(`# gdlint-ignore-next-line ...`) work too, so a project moving from either
+needs no edits.
+
+## Files with syntax errors
+
+A file with a syntax error is skipped, not reported as a problem: syntax
+errors are Godot's to report, so in gdsuite they come from gdtypecheck. gdtidy
+still lists the file and Godot's message on stderr (and under `skipped` in
+JSON), and exits with `2`, so a run that left files out never looks clean.
+
+## Exit codes
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No problems (`fmt`: formatted, or nothing to change) |
+| `1` | Problems found (`fmt --check` or `--diff`: some files would change) |
+| `2` | The check could not run, or some files could not be checked |
+
+## GitHub code scanning
+
+```yaml
+- run: gdtidy lint --format sarif > gdtidy.sarif
+  continue-on-error: true
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: gdtidy.sarif
+```
+
+Each finding links to its rule on the [Lint Rules](/docs/rules) page.

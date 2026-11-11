@@ -2,12 +2,16 @@
 
 Formats and lints GDScript, following the [official Godot style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html). It is one fast binary with no Python, and is meant to replace `gdformat` and `gdlint` in [gdsuite](https://github.com/q-rault/gdsuite).
 
-> **Status:** `gdtidy lint` has gdlint's rules, with the same findings on 14 public projects, plus 9 more ([RFC 0002](rfcs/0002-lint-rules.md)); [docs/rules.md](docs/rules.md) lists them all. `gdtidy fmt` formats to the style guide without ever changing what the code does ([RFC 0003](rfcs/0003-formatter.md)); [docs/formatting.md](docs/formatting.md) lists every change it makes.
+> **Status:** `gdtidy lint` has gdlint's rules, with the same findings on 14 public projects, plus 9 more ([RFC 0002](rfcs/0002-lint-rules.md)); [the rules page](https://q-rault.github.io/gdtidy/docs/rules) lists them all. `gdtidy fmt` formats to the style guide without ever changing what the code does ([RFC 0003](rfcs/0003-formatter.md)); [the formatting page](https://q-rault.github.io/gdtidy/docs/formatting) lists every change it makes.
+
+Documentation: **[q-rault.github.io/gdtidy](https://q-rault.github.io/gdtidy/)**
 
 ## Install
 
+Download a binary from the [releases page](https://github.com/q-rault/gdtidy/releases), or:
+
 ```sh
-cargo install --path crates/gdtidy
+cargo install gdtidy
 ```
 
 ## Usage
@@ -23,7 +27,7 @@ gdtidy lint --format json    # for tools and agents
 gdtidy lint --format sarif   # for GitHub code scanning
 gdtidy lint --fix            # repair what is safe to repair, report the rest
 gdtidy migrate               # convert ./gdlintrc and ./gdformatrc into gdtidy.toml (or gdsuite.toml)
-gdtidy rules                 # every rule gdtidy can report (see docs/rules.md)
+gdtidy rules                 # every rule gdtidy can report
 ```
 
 When walking a folder, gdtidy skips hidden folders, `addons`, folders with a `.gdignore`, and nested Godot projects, as the editor does. A file or folder you name directly is always checked.
@@ -60,11 +64,11 @@ An unknown rule, option or key is an error, so a typo never turns a rule off. In
 
 The original files are left as they are. If `gdtidy.toml` (or `gdsuite.toml`) exists, only the sections it does not have yet are added, so a project converted from gdlint can convert its gdformatrc later. `--force` replaces a whole `gdtidy.toml`, but never touches a section already in `gdsuite.toml`.
 
-Differences with gdlint, all deliberate, are listed in [docs/gdlint-differences.md](docs/gdlint-differences.md).
+Differences with gdlint, all deliberate, are listed in [Moving from gdtoolkit](https://q-rault.github.io/gdtidy/docs/migrate-from-gdtoolkit#differences-with-gdlint).
 
 ### Formatting
 
-`gdtidy fmt` follows the style guide: tabs, two blank lines around functions and classes, one space around operators, `and`/`or`/`not`, double quotes, enums one member per line, trailing commas in multi-line collections, and more ([docs/formatting.md](docs/formatting.md)). It keeps the line breaks you write and never wraps lines. Every result is parsed again and must have the same code as before, or the file is left alone and reported, so formatting can never change what a script does.
+`gdtidy fmt` follows the style guide: tabs, two blank lines around functions and classes, one space around operators, `and`/`or`/`not`, double quotes, enums one member per line, trailing commas in multi-line collections, and more ([formatting](https://q-rault.github.io/gdtidy/docs/formatting)). It keeps the line breaks you write and never wraps lines. Every result is parsed again and must have the same code as before, or the file is left alone and reported, so formatting can never change what a script does.
 
 To keep a hand-aligned part of a file as it is:
 

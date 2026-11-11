@@ -510,11 +510,15 @@ fn output_order_does_not_depend_on_threads() {
     assert_eq!(run(), first);
 }
 
-/// SARIF results link to docs/rules.md, so every rule needs a section there.
+/// SARIF results link to the rules page of the docs site, so every rule needs a
+/// section in docs/content/docs/rules.mdx.
 #[test]
 fn every_rule_is_documented() {
-    let docs =
-        fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/rules.md")).unwrap();
+    let docs = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/content/docs/rules.mdx"
+    ))
+    .unwrap();
     let output = gdtidy()
         .args(["rules", "--format", "json"])
         .output()
@@ -524,7 +528,7 @@ fn every_rule_is_documented() {
         let id = rule["id"].as_str().unwrap();
         assert!(
             docs.contains(&format!("\n## {id}\n")),
-            "docs/rules.md has no section for {id}"
+            "docs/content/docs/rules.mdx has no section for {id}"
         );
     }
 }

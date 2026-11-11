@@ -1,10 +1,42 @@
-# Differences with gdlint
+---
+title: Moving from gdtoolkit
+description: Convert gdlintrc and gdformatrc with gdtidy migrate, and every way gdtidy differs from gdlint and gdformat.
+---
 
-gdtidy keeps 24 of gdlint 4.5's rules with the same names, defaults and findings, and `max-line-length` with a different tab width. This page lists every place where the two report something different, and why. The comparison test (`GDTIDY_PARITY=1`, see `crates/gdtidy/tests/parity.rs`) checks it: it fails if gdlint reports something gdtidy does not, and lists what only gdtidy reports.
+## Convert the configuration
+
+```sh
+gdtidy migrate              # ./gdlintrc and ./gdformatrc, with or without a leading dot
+gdtidy migrate --stdout     # print the result instead of writing it
+```
+
+`gdtidy migrate` reads `gdlintrc` and `gdformatrc` and writes a `gdtidy.toml`
+next to them, or adds the sections to the `gdsuite.toml` there when the project
+has one and no `gdtidy.toml`:
+
+- its `[lint]` section reports the same problems as gdlint. It keeps the values
+  the project changed, keeps gdlint's tab width for `max-line-length`, and says
+  where each dropped rule went, such as `unused-argument`, which Godot reports.
+- its `[fmt]` section keeps gdformat's excluded folders and its `{"a": 1}`
+  dictionaries. gdformat's `line_length` has no equivalent, because gdtidy does
+  not wrap lines.
+
+The original files are left as they are. If `gdtidy.toml` (or `gdsuite.toml`)
+exists, only the sections it does not have yet are added, so a project
+converted from gdlint can convert its gdformatrc later. `--force` replaces a
+whole `gdtidy.toml`, but never touches a section already in `gdsuite.toml`.
+
+Rule names and silencing comments are gdlint's, so nothing else in the project
+needs to change. Formatting differences with gdformat are listed on the
+[Formatting](/docs/formatting#differences-with-gdformat) page.
+
+## Differences with gdlint
+
+gdtidy keeps 24 of gdlint 4.5's rules with the same names, defaults and findings, and `max-line-length` with a different tab width. This page lists every place where the two report something different, and why. The comparison test (`GDTIDY_PARITY=1`, see [`crates/gdtidy/tests/parity.rs`](https://github.com/q-rault/gdtidy/blob/main/crates/gdtidy/tests/parity.rs)) checks it: it fails if gdlint reports something gdtidy does not, and lists what only gdtidy reports.
 
 On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not parse 21 files, which gdtidy lints as usual. On the other 1,098 files, gdtidy reports all 835 of gdlint's findings, plus 8 from the static-function difference below.
 
-## Rules that moved
+### Rules that moved
 
 | gdlint rule | Where it went |
 |---|---|
@@ -14,7 +46,7 @@ On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not 
 | `trailing-whitespace` | `gdtidy fmt` removes it |
 | `tab-characters` | The `tab-width` option of `max-line-length` |
 
-## Deliberate differences
+### Deliberate differences
 
 | Rule | gdlint | gdtidy | Why |
 |---|---|---|---|
@@ -28,7 +60,7 @@ On the 14 public projects used to test gdsyntax (1,119 files), gdlint could not 
 | Every rule | Lints a nested Godot project (a folder with its own `project.godot`) as part of the outer one | Skips it when walking folders, as the Godot editor does; name the folder to lint it | It is another project, with its own `gdtidy.toml` |
 | Every rule | Reports a file with a syntax error as a problem | Skips it, lists it under `skipped`, and exits with 2 | Syntax errors are Godot's to report: gdtypecheck |
 
-## Configuration
+### Configuration
 
 | gdlintrc | gdtidy.toml |
 |---|---|

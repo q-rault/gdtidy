@@ -1,0 +1,41 @@
+---
+title: gdtidy
+description: Format and lint GDScript, following the official Godot style guide.
+---
+
+gdtidy formats and lints GDScript, following the
+[official Godot style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html).
+It is one fast binary with no Python, and replaces `gdformat` and `gdlint` in
+[gdsuite](https://q-rault.github.io/gdsuite/).
+
+```sh
+gdtidy fmt     # format the project in place
+gdtidy lint    # report style and convention problems
+```
+
+- [Installation](/docs/installation)
+- [Formatting](/docs/formatting): what `gdtidy fmt` changes
+- [Linting](/docs/linting) and the [lint rules](/docs/rules)
+- [Configuration](/docs/configuration)
+- [Moving from gdtoolkit](/docs/migrate-from-gdtoolkit)
+
+## What each tool checks
+
+Each gdsuite tool answers one question, and a problem belongs to the first
+tool in this list that can see it:
+
+1. **`gdtidy fmt`**: layout that can be fixed without changing what the code does, and without a judgement call.
+2. **[gdtypecheck](https://q-rault.github.io/gdtypecheck/)**: anything Godot's compiler reports, or that needs types, the engine or other files' resources.
+3. **[gdtest](https://q-rault.github.io/gdtest/)**: anything that needs the code to run.
+4. **[gdhealth](https://q-rault.github.io/gdhealth/)**: anything that needs several files, git history or project-wide figures. gdhealth measures; it does not fail a build on a single function's size.
+5. **`gdtidy lint`**: everything else that one file's syntax can answer, such as naming, member order and per-function limits.
+
+So `gdtidy lint` never reports what `gdtidy fmt` would fix, nor what Godot
+already warns about. Every rule declares the concern it covers
+(`gdtidy rules --format json`), so gdsuite can check that no two tools claim
+the same one.
+
+## Parser
+
+gdtidy reads GDScript with [gdsyntax](https://github.com/q-rault/gdsyntax), a
+parser translated from Godot's own, so it reads every script Godot reads.

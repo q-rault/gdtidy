@@ -12,7 +12,7 @@ pub fn report(diagnostics: &[Diagnostic], skipped: &[Skipped]) -> Value {
             json!({
                 "id": rule.id,
                 "shortDescription": { "text": rule.summary },
-                "helpUri": format!("https://github.com/q-rault/gdtidy/blob/main/docs/rules.md#{}", rule.id),
+                "helpUri": format!("https://q-rault.github.io/gdtidy/docs/rules#{}", rule.id),
                 "defaultConfiguration": { "level": "warning", "enabled": rule.default_enabled },
                 "properties": { "concern": rule.concern, "fixable": rule.fixable },
             })

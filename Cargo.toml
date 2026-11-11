@@ -27,7 +27,7 @@ yaml-rust2 = "0.10"
 
 # From crates.io. To try unreleased gdsyntax changes, add to
 # .cargo/config.toml: [patch.crates-io] gdsyntax = { path = "../gdsyntax" }
-gdsyntax = "0.1.4"
+gdsyntax = "0.1.5"
 
 [profile.release]
 lto = "thin"

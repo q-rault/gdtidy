@@ -101,7 +101,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "release: v${VERSION}"
+          # Already at this version (Cut release run again after a failed
+          # release, see PUBLISHING.md): tag main as it is.
+          if git diff --quiet HEAD; then
+            echo "Already at ${VERSION}: tagging main as it is"
+          else
+            git commit -am "release: v${VERSION}"
+          fi
           git tag -a "v${VERSION}" -m "gdtidy v${VERSION}"
           # Atomic: if main moved since the checkout, neither the commit nor the tag lands.
           git push --atomic origin HEAD:refs/heads/main "refs/tags/v${VERSION}"

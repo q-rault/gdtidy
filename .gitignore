@@ -3,8 +3,3 @@ target/
 # Local agent notes
 /.ai/
 
-# Docs build artifacts
-/docs/.next/
-/docs/out/
-/docs/.source/
-/docs/node_modules/

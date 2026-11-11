@@ -1,23 +1,64 @@
-# What `gdtidy fmt` changes
+---
+title: Formatting
+description: What gdtidy fmt changes, what it never touches, and how to keep a part of a file as written.
+---
+
+```sh
+gdtidy fmt                   # format the whole project in place
+gdtidy fmt player/ hud.gd    # only these files and folders
+gdtidy fmt --check           # change nothing; list the files that would change
+gdtidy fmt --diff            # change nothing; show the changes
+gdtidy fmt -                 # format standard input to standard output
+```
+
+`gdtidy fmt` follows the [official style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html).
+It keeps the line breaks you write and never wraps lines. Every result is
+parsed again and must have the same code as before, or the file is left alone
+and reported, so formatting can never change what a script does.
+
+## Keeping a part as written
+
+```gdscript
+# gdtidy: fmt-off
+const TABLE = [
+	[1,   0],
+	[0,  10],
+]
+# gdtidy: fmt-on
+```
+
+## Settings
+
+Two choices where the guide and common practice disagree are
+[settings](/docs/configuration#fmt):
+
+- **Continuation indent** for a line continued after `foo(a,` or a `\`: the
+  guide uses two levels (`continuation-indent = 2`), but many projects use
+  one. A bracket that ends its line, as in `foo(` followed by the arguments on
+  their own lines, always indents its content by one level.
+- **Spaces inside a one-line dictionary**: the guide writes `{ "a": 1 }`, but
+  most projects write `{"a": 1}` (`dict-brace-spaces = false`).
+
+## Every change it makes
 
 Everything here comes from the [official style guide](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html). `gdtidy fmt` changes layout and spelling only. Each result is parsed again and must have the same code and comments as the input; if it does not, the file is left alone and reported as `unsafe`, which is a gdtidy bug.
 
 It never wraps or joins lines, reorders anything, or renames anything. Where the guide says nothing, such as the spaces before an inline comment, the author's choice is kept.
 
-## Lines and indentation
+### Lines and indentation
 
 | Rule | Example |
 |---|---|
 | LF line endings, no byte order mark, no trailing whitespace, one final newline | |
 | One tab per block level; a file indented with spaces is converted | |
-| Inside a bracket that ends its line, one more level; the closing bracket goes back | `foo(`<br>`→1,`<br>`)` |
-| A line continued after content on the opener's line, or after `\`, gets `continuation-indent` levels (2 by default) | `foo(a,`<br>`→→b)` |
+| Inside a bracket that ends its line, one more level; the closing bracket goes back | `foo(`<br />`→1,`<br />`)` |
+| A line continued after content on the opener's line, or after `\`, gets `continuation-indent` levels (2 by default) | `foo(a,`<br />`→→b)` |
 | Comment lines are indented like the code around them | |
 | Two blank lines around functions and classes, comments and annotations directly above included | |
 | At most two blank lines between other class members, one inside a function or brackets, none at the start of a block | |
 | One statement per line: `a(); b()` is split, a final `;` removed (one-line lambdas are left alone) | |
 
-## Spacing
+### Spacing
 
 | Rule | Before | After |
 |---|---|---|
@@ -31,7 +72,7 @@ It never wraps or joins lines, reorders anything, or renames anything. Where the
 
 Node paths (`$Node/Path`, `%Unique`) are never touched.
 
-## Spelling
+### Spelling
 
 | Rule | Before | After |
 |---|---|---|
@@ -41,15 +82,15 @@ Node paths (`$Node/Path`, `%Unique`) are never touched.
 | Floats with both zeros | `.5`, `1.` | `0.5`, `1.0` |
 | No parentheses around a whole one-line `if`, `elif` or `while` condition | `if (a and b):` | `if a and b:` |
 
-## Layout
+### Layout
 
 | Rule | Before | After |
 |---|---|---|
-| Enums one member per line | `enum E {A, B}` | `enum E {`<br>`→A,`<br>`→B,`<br>`}` |
-| A trailing comma in a multi-line array, dictionary or enum (`trailing-commas`) | `[`<br>`→1`<br>`]` | `[`<br>`→1,`<br>`]` |
+| Enums one member per line | `enum E {A, B}` | `enum E {`<br />`→A,`<br />`→B,`<br />`}` |
+| A trailing comma in a multi-line array, dictionary or enum (`trailing-commas`) | `[`<br />`→1`<br />`]` | `[`<br />`→1,`<br />`]` |
 | No trailing comma in a one-line one | `[1, 2,]` | `[1, 2]` |
 
-## Differences with gdformat
+### Differences with gdformat
 
 | gdformat 4.5 | gdtidy |
 |---|---|

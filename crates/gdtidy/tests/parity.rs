@@ -11,7 +11,8 @@
 //! `gdlint` on the PATH).
 //!
 //! The test fails if gdlint reports something gdtidy does not. What only
-//! gdtidy reports is printed, to check against docs/gdlint-differences.md.
+//! gdtidy reports is printed, to check against
+//! docs/content/docs/migrate-from-gdtoolkit.mdx.
 //! `max-line-length` is left out: its tab width differs on purpose.
 
 use std::collections::BTreeMap;

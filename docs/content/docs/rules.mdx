@@ -1,8 +1,11 @@
-# gdtidy lint rules
+---
+title: Lint Rules
+description: Every rule gdtidy lint can report, its default and its options.
+---
 
-Every rule gdtidy can report. `gdtidy rules` lists them with whether they are on by default, and `gdtidy rules --format json` adds each rule's concern and options. [RFC 0002](../rfcs/0002-lint-rules.md) lists the rules still to come, and where gdlint's other rules went.
+Every rule gdtidy can report. `gdtidy rules` lists them with whether they are on by default, and `gdtidy rules --format json` adds each rule's concern and options. [RFC 0002](https://github.com/q-rault/gdtidy/blob/main/rfcs/0002-lint-rules.md) lists the rules still to come, and where gdlint's other rules went.
 
-Options are set in `gdtidy.toml`, or in the same sections of `gdsuite.toml` (see the [README](../README.md#configuration)):
+Options are set in `gdtidy.toml`, or in the same sections of `gdsuite.toml` (see [Configuration](/docs/configuration)):
 
 ```toml
 [lint.rules.max-line-length]

@@ -1,0 +1,50 @@
+---
+title: Configuration
+description: gdtidy's settings, in gdtidy.toml or gdsuite.toml.
+---
+
+## Where settings live
+
+`gdtidy.toml` sits next to `project.godot` (or in any folder under it). For
+each script, gdtidy uses the nearest one above it, never one outside the
+project.
+
+A project that uses [gdsuite](https://q-rault.github.io/gdsuite/) can instead
+keep the same `[lint]` and `[fmt]` sections in `gdsuite.toml`, next to the
+other tools' settings. In each folder, a `gdsuite.toml` with a `[lint]` or
+`[fmt]` section comes first. Keep gdtidy's settings in one file: a
+`gdtidy.toml` beside such a `gdsuite.toml` is ignored, with a warning, and the
+two are not merged.
+
+An unknown rule, option or key is an error, so a typo never turns a rule off.
+
+## lint
+
+```toml
+[lint]
+disable = ["max-line-length"]   # rules that are on by default
+enable = []                     # rules that are off by default
+exclude = ["generated"]         # folders to skip, as in .gitignore
+
+[lint.rules.max-line-length]
+max = 130
+```
+
+Each rule's options are on the [Lint Rules](/docs/rules) page.
+
+## fmt
+
+```toml
+[fmt]
+exclude = ["generated"]         # folders not to format
+continuation-indent = 2         # levels for a continued line (1 is common too)
+dict-brace-spaces = true        # { "a": 1 }; false gives {"a": 1}
+trailing-commas = true          # add them to multi-line arrays, dictionaries and enums
+```
+
+## exclude
+
+In `exclude`, a name alone (`generated`) is a folder at any depth, and a path
+(`tools/generated`, `/generated`) is relative to the `gdtidy.toml`. Hidden
+folders, `addons`, folders with a `.gdignore` and nested Godot projects are
+always skipped when walking, so they need no entry.

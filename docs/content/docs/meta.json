@@ -1,0 +1,16 @@
+{
+  "title": "gdtidy",
+  "pages": [
+    "index",
+    "---Getting Started---",
+    "installation",
+    "---Guides---",
+    "formatting",
+    "linting",
+    "migrate-from-gdtoolkit",
+    "---Reference---",
+    "rules",
+    "configuration",
+    "cli-reference"
+  ]
+}

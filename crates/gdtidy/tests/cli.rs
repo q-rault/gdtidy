@@ -249,6 +249,29 @@ fn fmt_diff_prints_a_unified_diff() {
 }
 
 #[test]
+fn fmt_check_json_reports_where_and_how_files_would_change() {
+    let dir = project(&[(
+        "main.gd",
+        "var a = 1\nvar b=2\nvar c = 3\nvar d=4\nvar e=5\n",
+    )]);
+    let output = gdtidy()
+        .current_dir(dir.path())
+        .args(["fmt", "--check", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["changed"], serde_json::json!(["main.gd"]));
+    assert_eq!(
+        report["changes"],
+        serde_json::json!({ "main.gd": [
+            { "first": 2, "last": 2, "kind": "spacing" },
+            { "first": 4, "last": 5, "kind": "spacing" },
+        ] })
+    );
+}
+
+#[test]
 fn fmt_skips_files_with_a_syntax_error() {
     let dir = project(&[("main.gd", VALID), ("broken.gd", BROKEN)]);
     let output = gdtidy()

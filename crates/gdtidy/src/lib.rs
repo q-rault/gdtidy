@@ -130,6 +130,8 @@ struct FmtReport {
     files: usize,
     /// Files that were formatted, or with --check or --diff, would be.
     changed: Vec<String>,
+    /// For each file in `changed`, where formatting would change it, in order.
+    changes: std::collections::BTreeMap<String, Vec<Change>>,
     skipped: Vec<lint::Skipped>,
 }
 
@@ -207,6 +209,7 @@ fn fmt(args: FmtArgs) -> Result<u8> {
         version: 1,
         files: jobs.len(),
         changed: Vec::new(),
+        changes: std::collections::BTreeMap::new(),
         skipped: Vec::new(),
     };
     for (shown, outcome) in &outcomes {
@@ -214,6 +217,7 @@ fn fmt(args: FmtArgs) -> Result<u8> {
             Formatted::Unchanged => {}
             Formatted::Changed { before, after } => {
                 report.changed.push(shown.clone());
+                report.changes.insert(shown.clone(), changes(before, after));
                 if args.diff && matches!(args.format, RulesFormat::Text) {
                     print!("{}", unified_diff(shown, before, after));
                 }
@@ -286,6 +290,174 @@ fn fmt_stdin(args: &FmtArgs) -> Result<u8> {
             eprintln!("{}:{}:{}: skipped: {}", s.path, s.line, s.column, s.message);
             Ok(FAILED)
         }
+    }
+}
+
+/// One place formatting would change: lines `first` to `last` (1-based,
+/// inclusive) of the file as it is now, and what kind of change it is.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct Change {
+    first: usize,
+    last: usize,
+    kind: ChangeKind,
+}
+
+/// What a change does, told apart by comparing the lines before and after.
+/// The formatter rewrites the whole file, so this is read from the result,
+/// not from which of its steps made the change.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ChangeKind {
+    /// Only whitespace at the end of lines.
+    TrailingWhitespace,
+    /// Only blank lines added or removed.
+    BlankLines,
+    /// Only whitespace at the start of lines.
+    Indentation,
+    /// Only spaces within lines.
+    Spacing,
+    /// The same code split over more lines, or joined into fewer.
+    LineWrapping,
+    /// Only `'` turned into `"`, and spacing.
+    Quotes,
+    /// Anything else, or several of the above at once.
+    Other,
+}
+
+/// Where `before` differs from `after`. Lines only added are marked on the
+/// line they go before, or on the last line at the end of the file.
+fn changes(before: &str, after: &str) -> Vec<Change> {
+    let old_lines: Vec<&str> = before.lines().collect();
+    let new_lines: Vec<&str> = after.lines().collect();
+    let line_count = old_lines.len().max(1);
+    let mut found: Vec<Change> = Vec::new();
+    for op in similar::TextDiff::from_lines(before, after).ops() {
+        if matches!(op.tag(), similar::DiffTag::Equal) {
+            continue;
+        }
+        let old = op.old_range();
+        let new = op.new_range();
+        let kind = change_kind(
+            slice(&old_lines, old.clone()),
+            slice(&new_lines, new.clone()),
+        );
+        let first = (old.start + 1).min(line_count);
+        let last = old.end.max(first).min(line_count);
+        match found.last_mut() {
+            Some(previous) if previous.kind == kind && first <= previous.last + 1 => {
+                previous.last = previous.last.max(last);
+            }
+            _ => found.push(Change { first, last, kind }),
+        }
+    }
+    found
+}
+
+fn slice<'a>(lines: &'a [&'a str], range: std::ops::Range<usize>) -> &'a [&'a str] {
+    &lines[range.start.min(lines.len())..range.end.min(lines.len())]
+}
+
+fn change_kind(old: &[&str], new: &[&str]) -> ChangeKind {
+    let without_blank = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.to_string())
+            .collect()
+    };
+    let squashed = |lines: &[&str]| -> String {
+        lines
+            .iter()
+            .flat_map(|line| line.chars())
+            .filter(|c| !c.is_whitespace())
+            .collect()
+    };
+    if old.len() == new.len() {
+        if old
+            .iter()
+            .zip(new)
+            .all(|(o, n)| o.trim_end() == n.trim_end())
+        {
+            // Equal but for line ends: only trailing whitespace was there.
+            return ChangeKind::TrailingWhitespace;
+        }
+        if old
+            .iter()
+            .zip(new)
+            .all(|(o, n)| o.trim_start() == n.trim_start())
+        {
+            return ChangeKind::Indentation;
+        }
+    }
+    if without_blank(old) == without_blank(new) {
+        return ChangeKind::BlankLines;
+    }
+    if squashed(old) == squashed(new) {
+        return if old.len() == new.len() {
+            ChangeKind::Spacing
+        } else {
+            ChangeKind::LineWrapping
+        };
+    }
+    // Splitting a list over lines adds a trailing comma; joining drops it.
+    if old.len() != new.len() && squashed(old).replace(',', "") == squashed(new).replace(',', "") {
+        return ChangeKind::LineWrapping;
+    }
+    if squashed(old).replace('\'', "\"") == squashed(new) {
+        return ChangeKind::Quotes;
+    }
+    ChangeKind::Other
+}
+
+#[cfg(test)]
+mod change_tests {
+    use super::*;
+
+    fn kind(before: &str, after: &str) -> Vec<(usize, usize, ChangeKind)> {
+        changes(before, after)
+            .into_iter()
+            .map(|c| (c.first, c.last, c.kind))
+            .collect()
+    }
+
+    #[test]
+    fn tells_kinds_of_change_apart() {
+        use ChangeKind::*;
+        assert_eq!(kind("var a=1\n", "var a = 1\n"), [(1, 1, Spacing)]);
+        assert_eq!(
+            kind("var a = 1   \n", "var a = 1\n"),
+            [(1, 1, TrailingWhitespace)]
+        );
+        assert_eq!(
+            kind("if x:\n  pass\n", "if x:\n\tpass\n"),
+            [(2, 2, Indentation)]
+        );
+        assert_eq!(
+            kind(
+                "var a = 1\nfunc f():\n\tpass\n",
+                "var a = 1\n\n\nfunc f():\n\tpass\n"
+            ),
+            [(2, 2, BlankLines)]
+        );
+        assert_eq!(kind("var s = 'x'\n", "var s = \"x\"\n"), [(1, 1, Quotes)]);
+        assert_eq!(kind("f(a,\n\tb)\n", "f(a, b)\n"), [(1, 2, LineWrapping)]);
+        assert_eq!(
+            kind("enum E { A, B }\n", "enum E {\n\tA,\n\tB,\n}\n"),
+            [(1, 1, LineWrapping)]
+        );
+        assert_eq!(kind("var a = 1\n", "var b = 2\n"), [(1, 1, Other)]);
+    }
+
+    #[test]
+    fn keeps_kinds_in_order() {
+        use ChangeKind::*;
+        assert_eq!(
+            kind(
+                "var a=1\nvar b = 2\nvar c = 3  \n",
+                "var a = 1\nvar b = 2\nvar c = 3\n"
+            ),
+            [(1, 1, Spacing), (3, 3, TrailingWhitespace)]
+        );
     }
 }
 

@@ -89,7 +89,8 @@ pub fn lint_file(shown: String, bytes: &[u8], config: &Config) -> Outcome {
             severity: Severity::Warning,
             rule: rule.id,
             concern: rule.concern,
-            fixable: rule.fixable,
+            // Not every problem of a fixable rule can be fixed where it is.
+            fixable: finding.fix.is_some(),
             message: finding.message,
             fix: finding.fix,
         });
@@ -129,10 +130,27 @@ pub fn lint_file(shown: String, bytes: &[u8], config: &Config) -> Outcome {
 /// fixed; `None` when there is nothing to fix, or when the fixed text fails
 /// the safety check, in which case the file is left as it is.
 ///
-/// The check: the fixed text parses without errors, and its code tokens
-/// are the original's minus those the fixes remove. A fix can change
-/// comments and blank space, and delete code, never add or alter it.
+/// Fixing one problem can leave room for another's fix, such as an `else`
+/// within an `else`, so it goes on until nothing is left to fix.
 pub fn fix_file(shown: String, bytes: &[u8], config: &Config) -> Option<(String, usize)> {
+    let (mut text, mut count) = fix_once(shown.clone(), bytes, config)?;
+    // Each pass removes problems; the limit is for a fix that would not.
+    for _ in 0..20 {
+        let Some((next, more)) = fix_once(shown.clone(), text.as_bytes(), config) else {
+            break;
+        };
+        text = next;
+        count += more;
+    }
+    Some((text, count))
+}
+
+/// One pass of `fix_file`, with the fixes that don't overlap.
+///
+/// The safety check: the fixed text parses without errors, and its code
+/// tokens are the original's, minus those the fixes remove, plus those they
+/// put in their place. A fix changes the code it names, and nothing else.
+fn fix_once(shown: String, bytes: &[u8], config: &Config) -> Option<(String, usize)> {
     let Outcome::Checked(diagnostics) = lint_file(shown, bytes, config) else {
         return None;
     };
@@ -164,24 +182,36 @@ pub fn fix_file(shown: String, bytes: &[u8], config: &Config) -> Option<(String,
         fixed.replace_range(edit.range.clone(), &edit.text);
     }
 
-    let code = |tree: &gdsyntax::SyntaxTree,
-                removed: &[&rules::Edit]|
-     -> Vec<(gdsyntax::SyntaxKind, String)> {
-        gdsyntax::ast::code_tokens(tree.root())
-            .filter(|t| {
-                let (start, end) = (
-                    usize::from(t.text_range().start()),
-                    usize::from(t.text_range().end()),
-                );
-                !removed
-                    .iter()
-                    .any(|e| e.range.start <= start && end <= e.range.end)
+    let code = |root: &gdsyntax::SyntaxNode| -> Vec<(usize, Code)> {
+        gdsyntax::ast::code_tokens(root)
+            .map(|t| {
+                let start = usize::from(t.text_range().start());
+                (start, (t.kind(), t.text().to_string()))
             })
-            .map(|t| (t.kind(), t.text().to_string()))
             .collect()
     };
-    let before = gdsyntax::parse(source);
+    let mut expected = code(gdsyntax::parse(source).root());
+    for edit in &edits {
+        let before = expected.len();
+        expected.retain(|(start, (_, text))| {
+            !(edit.range.start <= *start && start + text.len() <= edit.range.end)
+        });
+        // Text that replaces no code goes in a comment or between tokens,
+        // where it is no code either.
+        if expected.len() < before {
+            let (replacement, _) = gdsyntax::lossless_tree(&edit.text);
+            let at = edit.range.start;
+            expected.extend(code(&replacement).into_iter().map(|(_, t)| (at, t)));
+        }
+    }
+    expected.sort_by_key(|(start, _)| *start);
     let after = gdsyntax::parse(fixed.clone());
-    (after.errors().is_empty() && code(&after, &[]) == code(&before, &edits))
-        .then_some((fixed, count))
+    let same = code(after.root())
+        .into_iter()
+        .map(|(_, token)| token)
+        .eq(expected.into_iter().map(|(_, token)| token));
+    (after.errors().is_empty() && same).then_some((fixed, count))
 }
+
+/// A code token, whatever its place.
+type Code = (gdsyntax::SyntaxKind, String);

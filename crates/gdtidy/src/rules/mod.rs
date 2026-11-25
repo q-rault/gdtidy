@@ -61,8 +61,9 @@ impl Finding {
     }
 }
 
-/// Replacements in the source that repair one finding. A fix may remove
-/// code tokens and change trivia; `--fix` checks that it does nothing else.
+/// Replacements in the source that repair one finding. A fix may remove or
+/// replace whole code tokens and change trivia; `--fix` checks that it does
+/// nothing else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
     pub edits: Vec<Edit>,
@@ -106,7 +107,8 @@ pub struct Rule {
     pub summary: &'static str,
     /// Whether the rule runs without being enabled in `gdtidy.toml`.
     pub default_enabled: bool,
-    /// Whether `--fix` can repair what the rule reports.
+    /// Whether `--fix` can repair what the rule reports, at least where it is
+    /// safe: each finding says whether it is.
     pub fixable: bool,
     pub options: &'static [RuleOption],
     #[serde(skip)]

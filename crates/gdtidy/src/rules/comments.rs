@@ -10,7 +10,7 @@ pub const DOC_TAG: Rule = Rule {
     concern: "doc-comment-tags",
     summary: "A `##` doc comment tag that Godot ignores or shows as plain text.",
     default_enabled: true,
-    fixable: false,
+    fixable: true,
     options: &[],
     check: Some(doc_tag),
 };
@@ -80,6 +80,36 @@ fn valid_tutorial(rest: &str) -> bool {
         .starts_with(':')
 }
 
+/// The colon a tag lacks, or has too far, as `(range, text)` within `line`:
+/// `@deprecated use b()` is `@deprecated: use b()`, and `@tutorial(T) url` is
+/// `@tutorial(T): url`. `None` when that would not make it a tag Godot reads.
+fn doc_tag_fix(line: &str) -> Option<(std::ops::Range<usize>, &'static str)> {
+    let word_len = line[1..]
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(line.len() - 1);
+    let mut end = 1 + word_len;
+    if &line[1..end] == "tutorial" {
+        let title = line[end..].trim_start_matches([' ', '\t']);
+        if title.starts_with('(') {
+            end = line.len() - title.len() + title.find(')')? + 1;
+        }
+    }
+    let rest = &line[end..];
+    let spaces = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+    // Text glued to the tag, as in `@deprecated(use b)`, is no reason.
+    if spaces == 0 {
+        return None;
+    }
+    let fix = if rest[spaces..].starts_with(':') {
+        (end..end + spaces + 1, ":")
+    } else {
+        (end..end, ":")
+    };
+    let mut fixed = line.to_string();
+    fixed.replace_range(fix.0.clone(), fix.1);
+    doc_tag_problem(&fixed).is_none().then_some(fix)
+}
+
 fn doc_tag(cx: &Context, out: &mut Vec<Finding>) {
     // Tags are not read inside a [codeblock].
     let mut in_code = false;
@@ -95,7 +125,20 @@ fn doc_tag(cx: &Context, out: &mut Vec<Finding>) {
             continue;
         }
         if let Some(message) = doc_tag_problem(line) {
-            out.push(Finding::new(token_range(&comment), message));
+            let range = token_range(&comment);
+            let after_marks = comment.text().trim_start_matches('#').trim_start();
+            let line_start = range.start + (comment.text().len() - after_marks.len());
+            let fix = doc_tag_fix(line).map(|(at, text)| Fix {
+                edits: vec![Edit {
+                    range: line_start + at.start..line_start + at.end,
+                    text: text.to_string(),
+                }],
+            });
+            out.push(Finding {
+                range,
+                message,
+                fix,
+            });
         }
     }
 }
@@ -161,6 +204,31 @@ mod tests {
         assert!(doc_tag_problem("@param x the value").is_some());
         assert_eq!(doc_tag_problem("Some text with @param inside"), None);
         assert_eq!(doc_tag_problem("@ alone"), None);
+    }
+
+    #[test]
+    fn doc_tag_fixes() {
+        let fixed = |line: &str| {
+            let (range, text) = doc_tag_fix(line)?;
+            let mut fixed = line.to_string();
+            fixed.replace_range(range, text);
+            Some(fixed)
+        };
+        let some = |text: &str| Some(text.to_string());
+        assert_eq!(fixed("@deprecated use b()"), some("@deprecated: use b()"));
+        assert_eq!(fixed("@deprecated : use b()"), some("@deprecated: use b()"));
+        assert_eq!(
+            fixed("@tutorial https://a.b"),
+            some("@tutorial: https://a.b")
+        );
+        assert_eq!(
+            fixed("@tutorial(T) https://a.b"),
+            some("@tutorial(T): https://a.b")
+        );
+        assert_eq!(fixed("@tutorial"), None);
+        assert_eq!(fixed("@tutorial(T"), None);
+        assert_eq!(fixed("@deprecated(use b)"), None);
+        assert_eq!(fixed("@param x the value"), None);
     }
 
     #[test]

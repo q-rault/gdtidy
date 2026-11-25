@@ -202,7 +202,8 @@ var x = 1  # gdtidy: ignore=function-variable-name
 
 `gdtidy lint --fix` applies fixes that cannot change what the code does, then reports what is left.
 
-- **In this RFC:** `unnecessary-pass` (delete the statement and its line). Later candidates: `no-else-return` and `no-elif-return`, which dedent the else branch.
+- **In this RFC:** `unnecessary-pass` (delete the statement and its line). Added since: `no-else-return` (dedent the else branch), `no-elif-return` (`elif` becomes `if`) and `doc-tag` (the missing colon).
+- **Reviewed and left out:** what changes behaviour or needs a choice. `self-assignment` (a setter runs), `comparison-with-itself` (it may test for NaN, or be a typo), `loop-variable-assignment`, `duplicated-load` (needs a name), `max-line-length` (the formatter keeps the author's line breaks), the naming rules and `file-name` (names are used from scenes, strings and other scripts), the limits, `private-call` and `unknown-rule-in-comment`. `class-definitions-order` is possible for signals, enums and constants only: moving variables changes the order they are initialized in, and `@export_group` applies to what follows it.
 - **Safety:** a fix applies only to a file that parses without errors. The fixed text must parse without errors too. Apart from the removed nodes, it must give the same tree, ignoring trivia. Otherwise the file is left alone and the problem is reported as not fixed.
 - **Idempotence:** running `--fix` twice changes nothing the second time. A test checks this on the whole corpus.
 

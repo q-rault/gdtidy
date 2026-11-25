@@ -83,7 +83,7 @@ const TABLE = [
 
 ### Fixing
 
-`gdtidy lint --fix` repairs `unnecessary-pass` and `comment-space`, then reports what is left. A fix is applied only if the fixed file still parses and has the same code apart from what the fix removes; otherwise the file is left as it is.
+`gdtidy lint --fix` repairs `unnecessary-pass`, `no-elif-return`, `no-else-return`, `doc-tag` and `comment-space` where it is safe, then reports what is left. A fix is applied only if the fixed file still parses and has the same code apart from what the fix removes or replaces; otherwise the file is left as it is.
 
 ### Silencing a rule
 

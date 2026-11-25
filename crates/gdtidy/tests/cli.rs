@@ -604,6 +604,116 @@ fn fix_keeps_crlf_line_ends_and_files_without_a_final_newline() {
     );
 }
 
+/// What `lint --fix` makes of `source`, checking that a second run leaves it.
+fn fixed(source: &str) -> String {
+    let dir = project(&[
+        ("gdtidy.toml", "[lint]\ndisable = [\"max-returns\"]\n"),
+        ("a.gd", source),
+    ]);
+    let run = || {
+        let _ = gdtidy()
+            .current_dir(dir.path())
+            .args(["lint", "--fix"])
+            .assert();
+        fs::read_to_string(dir.path().join("a.gd")).unwrap()
+    };
+    let once = run();
+    assert_eq!(run(), once);
+    once
+}
+
+#[test]
+fn fix_turns_elif_and_else_after_return_into_plain_code() {
+    let source = "func f(x: int) -> int:
+\tif x > 2:
+\t\treturn 2
+\telif x > 1:
+\t\treturn 1
+\t# Neither.
+\telse:  # the rest
+\t\tvar text := \"\"\"
+\t\tkept
+\"\"\"
+
+\t\tif text.is_empty():
+\t\t\treturn 4
+\t\telse:
+\t\t\t# Inner.
+\t\t\treturn (
+\t\t\t\t5
+\t\t\t)
+\t\t\t# Last.
+
+
+func g(x: int) -> int:
+\tif x: return 1
+\telse: return 2
+";
+    assert_eq!(
+        fixed(source),
+        "func f(x: int) -> int:
+\tif x > 2:
+\t\treturn 2
+\tif x > 1:
+\t\treturn 1
+\t# Neither.
+\t# the rest
+\tvar text := \"\"\"
+\t\tkept
+\"\"\"
+
+\tif text.is_empty():
+\t\treturn 4
+\t# Inner.
+\treturn (
+\t\t5
+\t)
+\t# Last.
+
+
+func g(x: int) -> int:
+\tif x: return 1
+\treturn 2
+"
+    );
+}
+
+#[test]
+fn fix_leaves_an_else_whose_variables_would_clash_or_whose_if_is_annotated() {
+    for source in [
+        // After it, `speed` is the member.
+        "var speed := 1\n\n\nfunc f(x: bool) -> int:\n\tif x:\n\t\treturn 0\n\telse:\n\t\tvar speed := 2\n\t\tprint(speed)\n\treturn speed\n",
+        // A loop declares it again.
+        "func f(x: bool) -> void:\n\tif x:\n\t\treturn\n\telse:\n\t\tvar a := 2\n\t\tprint(a)\n\tfor i in 3:\n\t\tvar a := i\n\t\tprint(a)\n",
+        "func f(x: bool) -> int:\n\t@warning_ignore(\"integer_division\")\n\tif x:\n\t\treturn 0\n\telse:\n\t\treturn 5 / 2\n",
+    ] {
+        assert_eq!(fixed(source), source);
+    }
+}
+
+#[test]
+fn fix_adds_the_colon_a_doc_tag_lacks() {
+    assert_eq!(
+        fixed("extends Node\n## @deprecated use b()\nvar a := 1\n## @param x\nvar b := 1\n"),
+        "extends Node\n## @deprecated: use b()\nvar a := 1\n## @param x\nvar b := 1\n"
+    );
+}
+
+#[test]
+fn a_problem_is_fixable_only_where_it_can_be_fixed() {
+    let dir = project(&[(
+        "a.gd",
+        "func f() -> void:\n\tpass\n\tprint(1)\n\n\nfunc g() -> void:\n\tpass  # why\n\tprint(1)\n",
+    )]);
+    let output = gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "--format", "json"])
+        .assert();
+    let report: serde_json::Value = serde_json::from_slice(&output.get_output().stdout).unwrap();
+    assert_eq!(report["diagnostics"][0]["fixable"], true);
+    assert_eq!(report["diagnostics"][1]["fixable"], false);
+}
+
 #[test]
 fn lint_without_fix_changes_nothing() {
     let source = "extends Node\n\n\nfunc f() -> void:\n\tpass\n\tprint(1)\n";

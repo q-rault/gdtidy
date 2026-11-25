@@ -238,11 +238,15 @@ On by default, fixable. `pass` in a block, or a class, that has other statements
 
 ## no-elif-return
 
-On by default. An `elif` follows a branch that always returns, so it could be a plain `if`. A block always returns when one of its own statements is a `return`, an `if` with an `else` whose branches all always return, or a `match` with a `_` branch (without `when`) whose branches all always return. As in gdlint, the `return` does not have to be the block's last statement.
+On by default, fixable. An `elif` follows a branch that always returns, so it could be a plain `if`. A block always returns when one of its own statements is a `return`, an `if` with an `else` whose branches all always return, or a `match` with a `_` branch (without `when`) whose branches all always return. As in gdlint, the `return` does not have to be the block's last statement.
+
+`--fix` makes it an `if`, unless an annotation such as `@warning_ignore` applies to the whole `if`.
 
 ## no-else-return
 
-On by default. An `else` follows branches that all always return (as above), so its body could follow the `if` unindented. Not reported when the `else` declares a variable with the same name as one in the enclosing block, since moving it out would declare it twice.
+On by default, fixable. An `else` follows branches that all always return (as above), so its body could follow the `if` unindented. Not reported when the `else` declares a variable with the same name as one in the enclosing block, since moving it out would declare it twice.
+
+`--fix` removes the `else:` and unindents its body. It leaves alone an `else` in a lambda, one whose `if` has an annotation, and one that declares a variable whose name the rest of the block uses.
 
 ## private-call
 
@@ -252,13 +256,15 @@ Off by default. A method whose name starts with `_` is called on something other
 
 ## doc-tag
 
-On by default. A `##` doc comment line starts with a tag Godot 4.7 does not read as one, so the line is dropped or shown as plain text in the built-in docs:
+On by default, fixable. A `##` doc comment line starts with a tag Godot 4.7 does not read as one, so the line is dropped or shown as plain text in the built-in docs:
 
 - `@deprecated` and `@experimental` must be alone, or followed directly by `:` and a reason. `@deprecated : reason` and `@deprecated reason` are shown as text.
 - `@tutorial` must be `@tutorial: url` or `@tutorial(Title): url`. Godot silently drops any other `@tutorial` line.
 - Any other `@tag`, such as `@param` or `@return`, is shown as text.
 
 Lines inside a `[codeblock]` are not checked.
+
+`--fix` puts the missing `:` after `@deprecated`, `@experimental` or `@tutorial`, or removes the space before it. Other tags are left to you.
 
 ## comment-space
 

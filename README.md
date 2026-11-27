@@ -26,6 +26,7 @@ gdtidy lint player/ hud.gd   # only these files and folders
 gdtidy lint --format json    # for tools and agents
 gdtidy lint --format sarif   # for GitHub code scanning
 gdtidy lint --fix            # repair what is safe to repair, report the rest
+gdtidy lint - --stdin-filename hud.gd   # lint unsaved text, as hud.gd
 gdtidy migrate               # convert ./gdlintrc and ./gdformatrc into gdtidy.toml (or gdsuite.toml)
 gdtidy rules                 # every rule gdtidy can report
 ```

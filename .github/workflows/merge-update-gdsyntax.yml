@@ -1,0 +1,43 @@
+# Merges the gdsyntax PR (update-gdsyntax.yml, branch auto/update-gdsyntax)
+# once CI passed on its latest commit. Merging releases nothing: Cut release
+# does. If CI fails, the PR stays open for a fix pushed to its branch.
+#
+# Merges with DEPENDENCY_PR_TOKEN, the token that opened the PR: a merge with
+# the default token would start no workflow on main.
+name: Merge gdsyntax PR
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [auto/update-gdsyntax]
+
+permissions: {}
+
+jobs:
+  merge:
+    # Only this repository's own branch: a fork can name a branch the same.
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge the PR
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDENCY_PR_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DEPENDENCY_PR_TOKEN is not set: merge the PR by hand (see PUBLISHING.md)"
+            exit 0
+          fi
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head auto/update-gdsyntax --state open --json number,headRepositoryOwner \
+            --jq ".[] | select(.headRepositoryOwner.login == \"${GITHUB_REPOSITORY_OWNER}\") | .number")
+          if [ -z "$pr" ]; then
+            echo "No open gdsyntax PR."
+            exit 0
+          fi
+          # Only the commit CI passed on: a newer push waits for its own run.
+          gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+          echo "Merged #${pr}." >> "$GITHUB_STEP_SUMMARY"

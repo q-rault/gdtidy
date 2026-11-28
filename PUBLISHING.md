@@ -46,7 +46,7 @@ After a stable release, Publish release starts gdsuite's pin-tools workflow, whi
 
 ### Following gdsyntax: `DEPENDENCY_PR_TOKEN`
 
-**Update gdsyntax** (`.github/workflows/update-gdsyntax.yml`) keeps one PR open, on the `auto/update-gdsyntax` branch, that moves the `gdsyntax = "..."` requirement in `Cargo.toml` and `Cargo.lock` to gdsyntax's latest stable release. gdsyntax's Publish release starts it in gdhealth, gdtest and gdtidy after each stable release; it can also be run from the Actions tab. If CI fails on the PR, the new gdsyntax needs changes: push them to that branch. Merging the PR does not release this tool: run Cut release for that.
+**Update gdsyntax** (`.github/workflows/update-gdsyntax.yml`) keeps one PR open, on the `auto/update-gdsyntax` branch, that moves the `gdsyntax = "..."` requirement in `Cargo.toml` and `Cargo.lock` to gdsyntax's latest stable release. gdsyntax's Publish release starts it in gdhealth, gdtest and gdtidy after each stable release; it can also be run from the Actions tab. Once CI passes on its latest commit, **Merge gdsyntax PR** (`.github/workflows/merge-update-gdsyntax.yml`) merges it with `DEPENDENCY_PR_TOKEN`. If CI fails on the PR, the new gdsyntax needs changes: push them to that branch, and it merges once CI passes. Merging the PR does not release this tool: run Cut release for that.
 
 A PR opened with a workflow's default token gets no CI, so the workflow uses a token of yours. One token serves the three tools:
 

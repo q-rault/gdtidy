@@ -6,12 +6,13 @@ description: Every gdtidy command and flag.
 ```sh
 gdtidy fmt [--check | --diff] [--format text|json] [PATHS]...
 gdtidy lint [--fix] [--format text|json|sarif] [PATHS]...
+gdtidy lint [--format text|json|sarif] [--stdin-filename PATH] -
 gdtidy rules [--format text|json]
 gdtidy migrate [--stdout] [--force] [FILES]...
 ```
 
 `PATHS` default to the current folder. In `gdtidy fmt`, `-` reads standard
-input and writes standard output.
+input and writes standard output; in `gdtidy lint`, `-` lints standard input.
 
 ## gdtidy fmt
 
@@ -29,6 +30,7 @@ See [Formatting](/docs/formatting).
 |---|---|
 | `--fix` | Repair the problems that can be repaired safely, then report the rest |
 | `--format <FORMAT>` | `text` (default), `json`, or `sarif` (SARIF 2.1.0, for GitHub code scanning) |
+| `--stdin-filename <PATH>` | With `-`: lint standard input as the file at PATH, with its settings, and report its problems under PATH |
 
 See [Linting](/docs/linting).
 

@@ -67,14 +67,19 @@ struct FmtArgs {
 
 #[derive(Args)]
 struct LintArgs {
-    /// Files or folders to lint
+    /// Files or folders to lint; `-` alone lints standard input
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
     #[arg(long, value_enum, default_value_t = LintFormat::Text)]
     format: LintFormat,
     /// Repair the problems that can be repaired safely, then report the rest
-    #[arg(long)]
+    #[arg(long, conflicts_with = "stdin_filename")]
     fix: bool,
+    /// With `-`: lint standard input as the file at this path, with its
+    /// settings, and show its problems under this path. Editors use it to
+    /// lint unsaved text.
+    #[arg(long, value_name = "PATH")]
+    stdin_filename: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -493,38 +498,19 @@ fn lint_exit_code(report: &LintReport) -> u8 {
 }
 
 fn run_lint(args: LintArgs) -> Result<u8> {
-    // Configurations are found first, in order, so errors in them are
-    // reported the same way every time; the files are then linted in
-    // parallel, and the results keep the files' order.
-    let mut configs = config::Configs::default();
-    let mut jobs = Vec::new();
-    for target in discover::gdscript_files(&args.paths)? {
-        let config = configs.for_file(&target.path)?;
-        if !target.explicit && config.excludes(&std::path::absolute(&target.path)?) {
-            continue;
-        }
-        jobs.push((target.path, config));
+    let stdin = args.paths.len() == 1 && args.paths[0].as_os_str() == "-";
+    if args.stdin_filename.is_some() && !stdin {
+        anyhow::bail!("--stdin-filename needs `-` as the only path");
     }
-    let outcomes: Vec<(lint::Outcome, usize)> = jobs
-        .par_iter()
-        .map(|(path, config)| {
-            let shown = discover::display_path(path);
-            let mut bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
-            let mut fixed = 0;
-            if args.fix
-                && let Some((text, count)) = lint::fix_file(shown.clone(), &bytes, config)
-            {
-                fs::write(path, &text).with_context(|| format!("cannot write {shown}"))?;
-                bytes = text.into_bytes();
-                fixed = count;
-            }
-            Ok((lint::lint_file(shown, &bytes, config), fixed))
-        })
-        .collect::<Result<_>>()?;
+    let (files, outcomes) = if stdin {
+        (1, vec![(lint_stdin(args.stdin_filename.as_deref())?, 0)])
+    } else {
+        lint_files(&args)?
+    };
 
     let mut report = LintReport {
         version: 1,
-        files: jobs.len(),
+        files,
         fixed: outcomes.iter().map(|(_, fixed)| fixed).sum(),
         diagnostics: Vec::new(),
         skipped: Vec::new(),
@@ -572,6 +558,55 @@ fn run_lint(args: LintArgs) -> Result<u8> {
         }
     }
     Ok(lint_exit_code(&report))
+}
+
+/// Lints the files `args` names: configurations are found first, in order,
+/// so errors in them are reported the same way every time; the files are then
+/// linted in parallel, and the results keep the files' order. Returns how
+/// many files there were, and what each gave with how many problems it fixed.
+fn lint_files(args: &LintArgs) -> Result<(usize, Vec<(lint::Outcome, usize)>)> {
+    let mut configs = config::Configs::default();
+    let mut jobs = Vec::new();
+    for target in discover::gdscript_files(&args.paths)? {
+        let config = configs.for_file(&target.path)?;
+        if !target.explicit && config.excludes(&std::path::absolute(&target.path)?) {
+            continue;
+        }
+        jobs.push((target.path, config));
+    }
+    let outcomes = jobs
+        .par_iter()
+        .map(|(path, config)| {
+            let shown = discover::display_path(path);
+            let mut bytes = fs::read(path).with_context(|| format!("cannot read {shown}"))?;
+            let mut fixed = 0;
+            if args.fix
+                && let Some((text, count)) = lint::fix_file(shown.clone(), &bytes, config)
+            {
+                fs::write(path, &text).with_context(|| format!("cannot write {shown}"))?;
+                bytes = text.into_bytes();
+                fixed = count;
+            }
+            Ok((lint::lint_file(shown, &bytes, config), fixed))
+        })
+        .collect::<Result<_>>()?;
+    Ok((jobs.len(), outcomes))
+}
+
+/// `gdtidy lint -`: lints standard input, as the file at `as_file` when given
+/// (its settings, and its path in the report), else as a file of the current
+/// folder.
+fn lint_stdin(as_file: Option<&std::path::Path>) -> Result<lint::Outcome> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    std::io::stdin().read_to_end(&mut bytes)?;
+    let path = as_file.unwrap_or(std::path::Path::new("stdin.gd"));
+    let config = config::Configs::default().for_file(path)?;
+    let shown = match as_file {
+        Some(path) => discover::display_path(path),
+        None => "<stdin>".to_string(),
+    };
+    Ok(lint::lint_file(shown, &bytes, &config))
 }
 
 fn list_rules(args: RulesArgs) -> Result<u8> {

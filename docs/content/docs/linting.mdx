@@ -9,12 +9,18 @@ gdtidy lint player/ hud.gd   # only these files and folders
 gdtidy lint --format json    # for tools and agents
 gdtidy lint --format sarif   # SARIF 2.1.0, for GitHub code scanning
 gdtidy lint --fix            # repair what is safe to repair, report the rest
+gdtidy lint - --stdin-filename hud.gd   # lint unsaved text, as hud.gd
 gdtidy rules                 # every rule gdtidy can report
 ```
 
 When walking a folder, gdtidy skips hidden folders, `addons`, folders with a
 `.gdignore`, and nested Godot projects, as the editor does. A file or folder
 you name directly is always checked.
+
+`-` lints standard input, for editors that lint text not saved yet. With
+`--stdin-filename`, the text is linted with the settings of that file and its
+problems name it; without, it gets the current folder's settings and shows as
+`<stdin>`. `--fix` does not apply to standard input.
 
 The [Lint Rules](/docs/rules) page describes every rule and its options.
 

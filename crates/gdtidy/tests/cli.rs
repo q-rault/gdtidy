@@ -857,3 +857,52 @@ fn migrate_writes_into_gdsuite_toml_when_the_project_has_one() {
         toml
     );
 }
+
+#[test]
+fn lint_reads_standard_input_as_the_file_it_is_told() {
+    // The settings are those of the file named: the nearest gdtidy.toml.
+    let dir = project(&[(
+        "ui/gdtidy.toml",
+        "[lint]\ndisable = [\"unnecessary-pass\"]\n",
+    )]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "-", "--stdin-filename", "ui/hud.gd"])
+        .write_stdin("func Bad():\n\tvar x = 1\n\tpass\n")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "ui/hud.gd:1:6: warning[function-name]",
+        ))
+        .stdout(predicate::str::contains("unnecessary-pass").not())
+        .stderr(predicate::str::contains("1 problem(s) (1 files)"));
+}
+
+#[test]
+fn standard_input_that_does_not_parse_is_skipped() {
+    let dir = project(&[]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "-"])
+        .write_stdin(BROKEN)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("<stdin>:3:"))
+        .stderr(predicate::str::contains(": skipped: "));
+}
+
+#[test]
+fn stdin_filename_needs_standard_input() {
+    let dir = project(&[("a.gd", VALID)]);
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "a.gd", "--stdin-filename", "a.gd"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("needs `-`"));
+    gdtidy()
+        .current_dir(dir.path())
+        .args(["lint", "-", "--fix", "--stdin-filename", "a.gd"])
+        .assert()
+        .code(2);
+}
